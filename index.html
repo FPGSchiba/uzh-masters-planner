@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UZH Master Curriculum Planner (WWF A7.2)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .drag-over { background-color: #f1f5f9; border-style: dashed; }
+    .card-dragging { opacity: 0.35; }
+    .kanban-scroll::-webkit-scrollbar { height: 8px; }
+    .kanban-scroll::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+    .kanban-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <div class="max-w-[1680px] mx-auto p-6">
+    
+    <!-- Header & Program Switcher -->
+    <header class="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-slate-200 gap-4">
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-2xl font-bold text-slate-900 tracking-tight">UZH Master Curriculum Planner</h1>
+          <span id="saveStatus" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-mono">Synced</span>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Regulated per <strong>WWF Studienordnung Anhang A7.2</strong> (90 Major + 30 Minor = 120 ECTS) • Weekly Calendar & .ics Export</p>
+      </div>
+
+      <div class="flex flex-wrap items-center gap-3">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Major-Studienprogramm (90 ECTS)</label>
+          <select id="majorSelect" class="bg-white border border-slate-300 text-sm rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"></select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Minor-Studienprogramm (30 ECTS)</label>
+          <select id="minorSelect" class="bg-white border border-slate-300 text-sm rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-blue-500 focus:outline-none font-medium"></select>
+        </div>
+
+        <div class="flex items-center gap-2 self-end">
+          <button id="openGlobalCalendarBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5" title="Open weekly schedule view">
+            <span>📅 Timetable</span>
+          </button>
+          <button id="addSemesterBtn" class="bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1">
+            <span>+ Add Semester</span>
+          </button>
+          <button id="removeSemesterBtn" class="border border-slate-300 hover:bg-slate-100 text-slate-700 text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors hidden">
+            <span>− Remove Semester</span>
+          </button>
+          <button id="addModuleBtn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-1.5 rounded-lg transition-colors">
+            + Add Module
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Global Clash Warning Bar -->
+    <div id="clashWarningBanner" class="hidden my-4 p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-medium flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <span class="text-base">⚠</span>
+        <span id="clashWarningText">Schedule conflicts detected in your timeline.</span>
+      </div>
+      <span class="text-[11px] text-amber-700 font-semibold">Review highlighted semester cards or open Timetable</span>
+    </div>
+
+    <!-- Degree Summary Cards -->
+    <div class="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+        <div>
+          <span class="text-xs text-slate-500 block">Total Degree Workload</span>
+          <span class="text-lg font-bold text-slate-900" id="stat-total">0 / 120 ECTS</span>
+        </div>
+        <div id="badge-total" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
+      </div>
+
+      <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+        <div>
+          <span class="text-xs text-slate-500 block" id="label-major-stat">Major Studienprogramm</span>
+          <span class="text-lg font-bold text-slate-900" id="stat-major">0 / 90 ECTS</span>
+        </div>
+        <div id="badge-major" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
+      </div>
+
+      <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+        <div>
+          <span class="text-xs text-slate-500 block" id="label-minor-stat">Minor Studienprogramm</span>
+          <span class="text-lg font-bold text-slate-900" id="stat-minor">0 / 30 ECTS</span>
+        </div>
+        <div id="badge-minor" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
+      </div>
+    </div>
+
+    <!-- Detailed A7.2 Audit Dashboard -->
+    <div class="my-5">
+      <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">A7.2 Major Module Verification Breakdown</h2>
+      <div class="grid grid-cols-2 md:grid-cols-6 gap-3" id="a72Container"></div>
+    </div>
+
+    <!-- Kanban Grid -->
+    <main class="kanban-scroll flex gap-4 overflow-x-auto pb-4 items-start" id="boardContainer"></main>
+
+    <!-- Footer -->
+    <div class="mt-6 flex justify-between items-center text-xs text-slate-500">
+      <div class="flex items-center gap-4">
+        <span>Terms: <span class="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">HS = Autumn</span> <span class="text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">FS = Spring</span> <span class="text-slate-600 font-semibold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">HS / FS = Both</span></span>
+        <span>• Click <strong>📅 Timetable</strong> on any semester to inspect weekly hours and download <strong>.ics</strong> files.</span>
+      </div>
+      <button id="reloadBtn" class="hover:text-blue-600 underline font-medium">Reload from Server</button>
+    </div>
+  </div>
+
+  <!-- Modal: Calendar / Timetable View -->
+  <div id="calendarModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+      
+      <!-- Calendar Header -->
+      <div class="p-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 bg-slate-50/70">
+        <div class="flex items-center gap-3">
+          <div class="p-2 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-700 font-bold text-sm">📅</div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h3 class="text-lg font-bold text-slate-900" id="calendarTitle">Semester Timetable</h3>
+              <span id="calendarTermBadge" class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-200 text-slate-700">HS</span>
+            </div>
+            <p class="text-xs text-slate-500" id="calendarSubtext">Weekly lecture distribution and room allocations</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <!-- Semester Selector Tabs -->
+          <div class="flex bg-slate-200/80 p-0.5 rounded-lg" id="calendarSemesterTabs"></div>
+
+          <!-- Export .ics Button -->
+          <button id="exportIcsBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm">
+            <span>📥 Export .ics (Calendar)</span>
+          </button>
+
+          <button id="closeCalendarBtn" class="text-slate-400 hover:text-slate-700 p-1.5 rounded-lg hover:bg-slate-200 text-base leading-none">✕</button>
+        </div>
+      </div>
+
+      <!-- Calendar Body -->
+      <div class="flex-1 overflow-y-auto p-5 space-y-4">
+        
+        <!-- Weekly Timetable Grid -->
+        <div class="border border-slate-200 rounded-xl bg-white overflow-hidden shadow-sm">
+          <!-- Days Header -->
+          <div class="grid grid-cols-6 border-b border-slate-200 bg-slate-50 text-center text-xs font-bold text-slate-700 py-2.5">
+            <div class="text-slate-400 font-mono text-[11px]">Time</div>
+            <div>Monday</div>
+            <div>Tuesday</div>
+            <div>Wednesday</div>
+            <div>Thursday</div>
+            <div>Friday</div>
+          </div>
+
+          <!-- Time Grid Container (08:00 to 20:00 = 12 Hours) -->
+          <div class="relative grid grid-cols-6" style="height: 660px;">
+            
+            <!-- Time Axis Column (08:00 to 20:00) -->
+            <div class="border-r border-slate-100 flex flex-col justify-between py-1 text-[11px] font-mono text-slate-400 text-center select-none bg-slate-50/30">
+              <span>08:00</span>
+              <span>09:00</span>
+              <span>10:00</span>
+              <span>11:00</span>
+              <span>12:00</span>
+              <span>13:00</span>
+              <span>14:00</span>
+              <span>15:00</span>
+              <span>16:00</span>
+              <span>17:00</span>
+              <span>18:00</span>
+              <span>19:00</span>
+              <span>20:00</span>
+            </div>
+
+            <!-- Monday to Friday Day Columns -->
+            <div class="relative border-r border-slate-100 day-col" data-day="Mon"></div>
+            <div class="relative border-r border-slate-100 day-col" data-day="Tue"></div>
+            <div class="relative border-r border-slate-100 day-col" data-day="Wed"></div>
+            <div class="relative border-r border-slate-100 day-col" data-day="Thu"></div>
+            <div class="relative day-col" data-day="Fri"></div>
+          </div>
+        </div>
+
+        <!-- Unscheduled / Flexible Modules Shelf -->
+        <div id="unscheduledSection" class="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50">
+          <h4 class="text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Flexible / By Arrangement (Thesis, Projects, Individual Study)</h4>
+          <div id="unscheduledContainer" class="flex flex-wrap gap-2 text-xs"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add Custom Module -->
+  <div id="modal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full p-6">
+      <h3 class="text-lg font-bold text-slate-900 mb-4">Add Custom Course Module</h3>
+      <form id="moduleForm" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Module Name</label>
+          <input type="text" id="modName" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g., Deep Learning">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Lecture Time Slot & Room (Optional)</label>
+          <input type="text" id="modSchedule" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g., Do 10:15 - 12:00, Raum: BIN-2.A.01">
+        </div>
+
+        <div class="grid grid-cols-3 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">ECTS Credits</label>
+            <input type="number" id="modEcts" required min="1" max="30" value="6" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Offered In</label>
+            <select id="modTerm" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium">
+              <option value="both" selected>Both (HS/FS)</option>
+              <option value="HS">Autumn (HS)</option>
+              <option value="FS">Spring (FS)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Category</label>
+            <select id="modCategory" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium">
+              <option value="pflicht">Pflichtmodul (6)</option>
+              <option value="masterprojekt">Projekt (15)</option>
+              <option value="wahlpflicht_major" selected>Wahlpflicht (18)</option>
+              <option value="wahl_inf">Wahl INF (15)</option>
+              <option value="wahl_wwf">Wahl WWF (6)</option>
+              <option value="masterarbeit">Thesis (30)</option>
+              <option value="minor">Minor (30)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Initial Column</label>
+          <select id="modCol" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"></select>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" id="cancelModalBtn" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+          <button type="submit" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save Module</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const MAJOR_RULES = {
+      "CG51087486": { pflichtModule: "Advanced Topics in Artificial Intelligence", wahlpflichtLabel: "Wahlpflicht INF AI" },
+      "CG51087487": { pflichtModule: "Foundations of Data Science", wahlpflichtLabel: "Wahlpflicht INF DS" },
+      "CG51087484": { pflichtModule: "Fundamentals of Software Systems", wahlpflichtLabel: "Wahlpflicht INF SOSY" },
+      "CG51087283": { pflichtModule: "Information Management", wahlpflichtLabel: "Wahlpflicht INF IS" },
+      "CG51087485": { pflichtModule: "Fundamentals of People-Oriented Computing", wahlpflichtLabel: "Wahlpflicht INF POC" }
+    };
+
+    const categoryStyles = {
+      pflicht: { label: 'Pflichtmodul', bg: 'bg-emerald-50 text-emerald-800 border-emerald-300' },
+      masterprojekt: { label: 'Masterprojekt', bg: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+      wahlpflicht_major: { label: 'Wahlpflicht Major', bg: 'bg-blue-50 text-blue-700 border-blue-200' },
+      wahl_inf: { label: 'Wahl INF', bg: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
+      wahl_wwf: { label: 'Wahl WWF', bg: 'bg-amber-50 text-amber-700 border-amber-200' },
+      masterarbeit: { label: 'Masterarbeit', bg: 'bg-purple-50 text-purple-700 border-purple-200' },
+      minor: { label: 'Minor', bg: 'bg-rose-50 text-rose-700 border-rose-200' }
+    };
+
+    let catalogue = { majors: [], minors: [], modules: [] };
+    let state = { selectedMajor: "", selectedMinor: "", semesterCount: 4, placements: {}, categoryOverrides: {}, customModules: [] };
+
+    let catalogueSearchQuery = "";
+    let catalogueTermFilter = "all";
+    let catalogueCatFilter = "all";
+    let activeCalendarSem = 1;
+
+    const majorSelect = document.getElementById('majorSelect');
+    const minorSelect = document.getElementById('minorSelect');
+
+    function getSemesterTerm(semNum) { return semNum % 2 !== 0 ? 'HS' : 'FS'; }
+    function getTermName(semNum) { return semNum % 2 !== 0 ? 'Autumn (HS)' : 'Spring (FS)'; }
+
+    function setSaveStatus(status) {
+      const el = document.getElementById('saveStatus');
+      if (status === 'saving') {
+        el.textContent = 'Saving...';
+        el.className = 'text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded border border-amber-200 font-mono';
+      } else if (status === 'saved') {
+        el.textContent = 'Saved to JSON';
+        el.className = 'text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-mono';
+        setTimeout(() => {
+          el.textContent = 'Synced';
+          el.className = 'text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-mono';
+        }, 1500);
+      } else {
+        el.textContent = 'Save Failed';
+        el.className = 'text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded border border-red-200 font-mono';
+      }
+    }
+
+    async function persistState() {
+      setSaveStatus('saving');
+      try {
+        const res = await fetch('/api/save_state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(state)
+        });
+        if (res.ok) setSaveStatus('saved');
+        else setSaveStatus('error');
+      } catch (err) {
+        setSaveStatus('error');
+      }
+    }
+
+    async function initApp() {
+      try {
+        const [catRes, stateRes] = await Promise.all([
+          fetch('/catalogue.json'),
+          fetch('/api/state')
+        ]);
+        catalogue = await catRes.json();
+        state = await stateRes.json();
+        if (!state.categoryOverrides) state.categoryOverrides = {};
+
+        majorSelect.innerHTML = catalogue.majors.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+        minorSelect.innerHTML = catalogue.minors.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+
+        if (state.selectedMajor && catalogue.majors.some(m => m.id === state.selectedMajor)) {
+          majorSelect.value = state.selectedMajor;
+        } else {
+          state.selectedMajor = majorSelect.value;
+        }
+
+        if (state.selectedMinor && catalogue.minors.some(m => m.id === state.selectedMinor)) {
+          minorSelect.value = state.selectedMinor;
+        } else {
+          state.selectedMinor = minorSelect.value;
+        }
+
+        buildBoardDOM();
+        renderCards();
+        renderAudit();
+      } catch (err) {
+        console.error('Initialization error:', err);
+      }
+    }
+
+    function buildBoardDOM() {
+      const board = document.getElementById('boardContainer');
+      board.innerHTML = '';
+
+      // Course Catalogue Column
+      const poolCol = document.createElement('div');
+      poolCol.className = 'w-80 shrink-0 flex flex-col bg-slate-100/70 border border-slate-200 rounded-xl p-3 min-h-[550px]';
+      poolCol.innerHTML = `
+        <div class="flex items-center justify-between mb-2 px-1">
+          <div>
+            <h2 class="font-bold text-sm text-slate-800">Course Catalogue</h2>
+            <span id="pool-subtext" class="text-[11px] text-slate-400">Available Modules</span>
+          </div>
+          <span id="pool-count" class="text-xs bg-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">0 (0 ECTS)</span>
+        </div>
+
+        <div class="space-y-1.5 mb-3 px-0.5">
+          <div class="relative">
+            <input type="text" id="catalogueSearch" placeholder="Search by name, ID, schedule..." 
+              value="${catalogueSearchQuery}"
+              class="w-full bg-white border border-slate-200 text-xs rounded-lg pl-7 pr-2 py-1.5 focus:ring-1 focus:ring-blue-500 focus:outline-none placeholder-slate-400">
+            <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+            </svg>
+          </div>
+          <div class="grid grid-cols-2 gap-1.5">
+            <select id="catalogueTermFilter" class="bg-white border border-slate-200 text-[11px] rounded-md px-1.5 py-1 focus:outline-none text-slate-600 font-medium">
+              <option value="all" ${catalogueTermFilter === 'all' ? 'selected' : ''}>All Terms</option>
+              <option value="HS" ${catalogueTermFilter === 'HS' ? 'selected' : ''}>Autumn (HS)</option>
+              <option value="FS" ${catalogueTermFilter === 'FS' ? 'selected' : ''}>Spring (FS)</option>
+              <option value="both" ${catalogueTermFilter === 'both' ? 'selected' : ''}>Both (HS/FS)</option>
+            </select>
+            <select id="catalogueCatFilter" class="bg-white border border-slate-200 text-[11px] rounded-md px-1.5 py-1 focus:outline-none text-slate-600 font-medium">
+              <option value="all" ${catalogueCatFilter === 'all' ? 'selected' : ''}>All Categories</option>
+              <option value="pflicht" ${catalogueCatFilter === 'pflicht' ? 'selected' : ''}>Pflichtmodul</option>
+              <option value="wahlpflicht_major" ${catalogueCatFilter === 'wahlpflicht_major' ? 'selected' : ''}>Wahlpflicht</option>
+              <option value="wahl_inf" ${catalogueCatFilter === 'wahl_inf' ? 'selected' : ''}>Wahl INF</option>
+              <option value="wahl_wwf" ${catalogueCatFilter === 'wahl_wwf' ? 'selected' : ''}>Wahl WWF</option>
+              <option value="masterprojekt" ${catalogueCatFilter === 'masterprojekt' ? 'selected' : ''}>Masterprojekt</option>
+              <option value="masterarbeit" ${catalogueCatFilter === 'masterarbeit' ? 'selected' : ''}>Masterarbeit</option>
+              <option value="minor" ${catalogueCatFilter === 'minor' ? 'selected' : ''}>Minor</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="col-pool" class="kanban-col flex-1 space-y-2.5 overflow-y-auto max-h-[700px] pr-1" data-col="pool"></div>
+      `;
+      board.appendChild(poolCol);
+
+      poolCol.querySelector('#catalogueSearch').addEventListener('input', (e) => {
+        catalogueSearchQuery = e.target.value.toLowerCase().trim();
+        renderCards();
+      });
+      poolCol.querySelector('#catalogueTermFilter').addEventListener('change', (e) => {
+        catalogueTermFilter = e.target.value;
+        renderCards();
+      });
+      poolCol.querySelector('#catalogueCatFilter').addEventListener('change', (e) => {
+        catalogueCatFilter = e.target.value;
+        renderCards();
+      });
+
+      // Semester Columns
+      for (let i = 1; i <= state.semesterCount; i++) {
+        const semId = `sem${i}`;
+        const semCol = document.createElement('div');
+        semCol.className = 'w-72 shrink-0 flex flex-col bg-white border border-slate-200 rounded-xl p-3 shadow-sm min-h-[550px]';
+        semCol.innerHTML = `
+          <div class="flex items-center justify-between mb-3 px-1">
+            <div>
+              <div class="flex items-center gap-1.5">
+                <h2 class="font-semibold text-sm text-slate-800">Semester ${i}</h2>
+                <button class="open-sem-cal-btn text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-0.5" data-sem="${i}">
+                  <span>📅 Timetable</span>
+                </button>
+              </div>
+              <span class="text-xs text-slate-400">${getTermName(i)}</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <span id="${semId}-clash-badge" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">⚠ Clash</span>
+              <span id="${semId}-count" class="text-xs font-semibold px-2 py-0.5 rounded-full">0 / 30 ECTS</span>
+            </div>
+          </div>
+          <div id="col-${semId}" class="kanban-col flex-1 space-y-2.5 overflow-y-auto max-h-[700px]" data-col="${semId}"></div>
+        `;
+        board.appendChild(semCol);
+
+        semCol.querySelector('.open-sem-cal-btn').addEventListener('click', (e) => {
+          openCalendarModal(i);
+        });
+      }
+
+      document.getElementById('removeSemesterBtn').classList.toggle('hidden', state.semesterCount <= 4);
+      updateModalColumnSelect();
+      attachDragListeners();
+    }
+
+    function updateModalColumnSelect() {
+      const select = document.getElementById('modCol');
+      select.innerHTML = '<option value="pool" selected>Course Catalogue</option>';
+      for (let i = 1; i <= state.semesterCount; i++) {
+        const opt = document.createElement('option');
+        opt.value = `sem${i}`;
+        opt.textContent = `Semester ${i} (${getTermName(i)})`;
+        select.appendChild(opt);
+      }
+    }
+
+    function attachDragListeners() {
+      document.querySelectorAll('.kanban-col').forEach(colEl => {
+        colEl.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          colEl.classList.add('drag-over');
+        });
+        colEl.addEventListener('dragleave', () => colEl.classList.remove('drag-over'));
+        colEl.addEventListener('drop', (e) => {
+          e.preventDefault();
+          colEl.classList.remove('drag-over');
+          const modId = e.dataTransfer.getData('text/plain');
+          const targetCol = colEl.dataset.col;
+
+          if (targetCol === 'pool') {
+            delete state.placements[modId];
+          } else {
+            state.placements[modId] = targetCol;
+          }
+
+          persistState();
+          renderCards();
+          renderAudit();
+        });
+      });
+    }
+
+    function getAvailableCategories(mod) {
+      if (mod.customCategory) {
+        return [{ category: mod.customCategory, label: categoryStyles[mod.customCategory]?.label || mod.customCategory }];
+      }
+
+      const majorInfo = MAJOR_RULES[state.selectedMajor] || { wahlpflichtLabel: "Wahlpflicht Major" };
+      const cats = [];
+
+      if (mod.programs && mod.programs[state.selectedMajor]) {
+        const pCats = mod.programs[state.selectedMajor].categories || [];
+        pCats.forEach(c => {
+          const catKey = c.category;
+          const label = catKey === 'wahlpflicht_major' ? majorInfo.wahlpflichtLabel : (categoryStyles[catKey]?.label || catKey);
+          if (!cats.some(item => item.category === catKey)) {
+            cats.push({ category: catKey, label: label });
+          }
+        });
+      }
+
+      if (mod.programs && mod.programs[state.selectedMinor]) {
+        if (!cats.some(item => item.category === 'minor')) {
+          cats.push({ category: 'minor', label: 'Minor' });
+        }
+      }
+
+      if (cats.length === 0) {
+        cats.push({ category: 'wahl_inf', label: 'Wahl INF' });
+      }
+
+      return cats;
+    }
+
+    function getSelectedCategory(mod) {
+      const avail = getAvailableCategories(mod);
+      const override = state.categoryOverrides && state.categoryOverrides[mod.id];
+      if (override && avail.some(a => a.category === override)) {
+        return override;
+      }
+      const priority = ['pflicht', 'masterprojekt', 'masterarbeit', 'wahlpflicht_major', 'wahl_inf', 'wahl_wwf', 'minor'];
+      for (const p of priority) {
+        if (avail.some(a => a.category === p)) return p;
+      }
+      return avail[0].category;
+    }
+
+    function computeScheduleClashes() {
+      const allModules = [...catalogue.modules, ...state.customModules];
+      const clashesByModId = {};
+
+      for (let i = 1; i <= state.semesterCount; i++) {
+        const semId = `sem${i}`;
+        const semMods = allModules.filter(m => state.placements[m.id] === semId && m.time_slots && m.time_slots.length > 0);
+
+        for (let j = 0; j < semMods.length; j++) {
+          for (let k = j + 1; k < semMods.length; k++) {
+            const modA = semMods[j];
+            const modB = semMods[k];
+
+            for (const slotA of modA.time_slots) {
+              for (const slotB of modB.time_slots) {
+                if (slotA.day === slotB.day) {
+                  const overlap = Math.max(slotA.start_min, slotB.start_min) < Math.min(slotA.end_min, slotB.end_min);
+                  if (overlap) {
+                    if (!clashesByModId[modA.id]) clashesByModId[modA.id] = [];
+                    if (!clashesByModId[modB.id]) clashesByModId[modB.id] = [];
+
+                    clashesByModId[modA.id].push({
+                      withName: modB.name,
+                      day: slotA.day,
+                      timeThis: `${slotA.start}-${slotA.end}`,
+                      timeOther: `${slotB.start}-${slotB.end}`
+                    });
+
+                    clashesByModId[modB.id].push({
+                      withName: modA.name,
+                      day: slotB.day,
+                      timeThis: `${slotB.start}-${slotB.end}`,
+                      timeOther: `${slotA.start}-${slotA.end}`
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      return clashesByModId;
+    }
+
+    function renderCards() {
+      const allCols = ['pool'];
+      for (let i = 1; i <= state.semesterCount; i++) allCols.push(`sem${i}`);
+      allCols.forEach(col => {
+        const el = document.getElementById(`col-${col}`);
+        if (el) el.innerHTML = '';
+      });
+
+      const allAvailableModules = [...catalogue.modules, ...state.customModules];
+      const clashes = computeScheduleClashes();
+
+      let totalClashCount = 0;
+      for (let i = 1; i <= state.semesterCount; i++) {
+        const semId = `sem${i}`;
+        const hasClash = allAvailableModules.some(m => state.placements[m.id] === semId && clashes[m.id]);
+        const clashBadge = document.getElementById(`${semId}-clash-badge`);
+        if (clashBadge) {
+          clashBadge.classList.toggle('hidden', !hasClash);
+          if (hasClash) totalClashCount++;
+        }
+      }
+
+      document.getElementById('clashWarningBanner').classList.toggle('hidden', totalClashCount === 0);
+
+      let displayedCatalogueCount = 0;
+      let displayedCatalogueEcts = 0;
+
+      allAvailableModules.forEach(mod => {
+        const placement = state.placements[mod.id] || 'pool';
+
+        const belongsToMajor = mod.programs && mod.programs[state.selectedMajor];
+        const belongsToMinor = mod.programs && mod.programs[state.selectedMinor];
+        if (placement === 'pool' && !belongsToMajor && !belongsToMinor && !mod.isCustom) {
+          return;
+        }
+
+        const availCats = getAvailableCategories(mod);
+        const activeCatKey = getSelectedCategory(mod);
+        const style = categoryStyles[activeCatKey] || categoryStyles.wahl_inf;
+        const term = mod.term || 'both';
+
+        if (placement === 'pool') {
+          if (catalogueSearchQuery) {
+            const matchesName = mod.name.toLowerCase().includes(catalogueSearchQuery);
+            const matchesId = (mod.sm_id || '').toLowerCase().includes(catalogueSearchQuery);
+            const matchesSchedule = (mod.schedule_text || '').toLowerCase().includes(catalogueSearchQuery);
+            if (!matchesName && !matchesId && !matchesSchedule) return;
+          }
+
+          if (catalogueTermFilter !== 'all') {
+            if (catalogueTermFilter === 'HS' && term !== 'HS' && term !== 'both') return;
+            if (catalogueTermFilter === 'FS' && term !== 'FS' && term !== 'both') return;
+            if (catalogueTermFilter === 'both' && term !== 'both') return;
+          }
+
+          if (catalogueCatFilter !== 'all') {
+            const matchesCategory = availCats.some(c => c.category === catalogueCatFilter);
+            if (!matchesCategory) return;
+          }
+
+          displayedCatalogueCount++;
+          displayedCatalogueEcts += mod.ects;
+        }
+
+        const card = document.createElement('div');
+        card.draggable = true;
+        card.dataset.id = mod.id;
+
+        let termBadge = `<span class="border px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-50 text-slate-600 border-slate-200">HS/FS</span>`;
+        if (term === 'HS') termBadge = `<span class="border px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border-amber-200">HS</span>`;
+        if (term === 'FS') termBadge = `<span class="border px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border-emerald-200">FS</span>`;
+
+        let termMismatchWarning = '';
+        let borderClass = 'border-slate-200 hover:border-slate-300';
+
+        if (placement.startsWith('sem')) {
+          const semNum = parseInt(placement.replace('sem', ''), 10);
+          const currentSemTerm = getSemesterTerm(semNum);
+          if (term !== 'both' && term !== currentSemTerm) {
+            borderClass = 'border-red-300 bg-red-50/20';
+            termMismatchWarning = `<div class="mt-2 text-[10px] font-semibold text-red-600">⚠ Only offered in ${term}</div>`;
+          }
+        }
+
+        let clashWarning = '';
+        if (clashes[mod.id]) {
+          borderClass = 'border-amber-400 bg-amber-50/20 shadow';
+          const details = clashes[mod.id].map(c => `Clashes with <strong class="text-amber-950">${c.withName}</strong> (${c.day} ${c.timeThis})`).join('<br/>');
+          clashWarning = `
+            <div class="mt-2 p-1.5 rounded bg-amber-100/80 border border-amber-300 text-[10px] text-amber-900 leading-tight">
+              <span class="font-bold flex items-center gap-1 text-amber-950">⚠ Time Conflict</span>
+              <div class="mt-0.5">${details}</div>
+            </div>
+          `;
+        }
+
+        let categoryElement = '';
+        if (availCats.length > 1) {
+          categoryElement = `
+            <select class="cat-select text-[11px] font-medium border rounded px-1 py-0.5 bg-white cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 ${style.bg}">
+              ${availCats.map(c => `<option value="${c.category}" ${c.category === activeCatKey ? 'selected' : ''}>${c.label}</option>`).join('')}
+            </select>
+          `;
+        } else {
+          categoryElement = `<span class="border px-1.5 py-0.5 rounded font-medium text-[11px] ${style.bg}">${availCats[0].label}</span>`;
+        }
+
+        const schedulePill = mod.schedule_text ? `
+          <div class="mt-1.5 text-[10px] text-slate-500 flex items-center gap-1 font-mono truncate" title="${mod.schedule_text}">
+            <span>📅</span>
+            <span class="truncate">${mod.schedule_text}</span>
+          </div>
+        ` : '';
+
+        card.className = `group relative bg-white border ${borderClass} rounded-lg p-3 shadow-sm hover:shadow cursor-grab active:cursor-grabbing transition-all`;
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-2 mb-1.5">
+            <a href="${mod.url}" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-slate-800 hover:text-blue-600 flex items-center gap-1 group/link">
+              <span>${mod.name}</span>
+              <svg class="w-3 h-3 text-slate-400 group-hover/link:text-blue-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+            </a>
+            <button class="delete-btn text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs">✕</button>
+          </div>
+          <div class="flex items-center justify-between gap-1 flex-wrap">
+            <div class="flex items-center gap-1.5">
+              ${categoryElement}
+              ${termBadge}
+            </div>
+            <span class="font-bold text-slate-600 text-[11px]">${mod.ects} ECTS</span>
+          </div>
+          ${schedulePill}
+          ${termMismatchWarning}
+          ${clashWarning}
+        `;
+
+        const catSelect = card.querySelector('.cat-select');
+        if (catSelect) {
+          catSelect.addEventListener('mousedown', (e) => e.stopPropagation());
+          catSelect.addEventListener('click', (e) => e.stopPropagation());
+          catSelect.addEventListener('change', (e) => {
+            state.categoryOverrides[mod.id] = e.target.value;
+            persistState();
+            renderCards();
+            renderAudit();
+          });
+        }
+
+        const link = card.querySelector('a');
+        link.addEventListener('click', (e) => e.stopPropagation());
+        link.addEventListener('mousedown', (e) => e.stopPropagation());
+
+        card.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', mod.id);
+          card.classList.add('card-dragging');
+        });
+        card.addEventListener('dragend', () => card.classList.remove('card-dragging'));
+
+        card.querySelector('.delete-btn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          delete state.placements[mod.id];
+          delete state.categoryOverrides[mod.id];
+          if (mod.isCustom) {
+            state.customModules = state.customModules.filter(m => m.id !== mod.id);
+          }
+          persistState();
+          renderCards();
+          renderAudit();
+        });
+
+        const targetCol = document.getElementById(`col-${placement}`) || document.getElementById('col-pool');
+        if (targetCol) targetCol.appendChild(card);
+      });
+
+      const poolCountEl = document.getElementById('pool-count');
+      if (poolCountEl) {
+        poolCountEl.textContent = `${displayedCatalogueCount} (${displayedCatalogueEcts} ECTS)`;
+      }
+    }
+
+    function renderAudit() {
+      const allModules = [...catalogue.modules, ...state.customModules];
+      const active = allModules.filter(m => state.placements[m.id] && state.placements[m.id].startsWith('sem'));
+      const majorRule = MAJOR_RULES[state.selectedMajor] || { pflichtModule: "", wahlpflichtLabel: "Wahlpflicht" };
+
+      let pflichtEcts = 0, projEcts = 0, wahlMajorEcts = 0, wahlInfEcts = 0, wahlWwfEcts = 0, thesisEcts = 0, minorEcts = 0;
+      let hasSpecificPflicht = false;
+
+      active.forEach(m => {
+        const cat = getSelectedCategory(m);
+        if (cat === 'pflicht') {
+          pflichtEcts += m.ects;
+          if (majorRule.pflichtModule && m.name.toLowerCase().includes(majorRule.pflichtModule.toLowerCase())) {
+            hasSpecificPflicht = true;
+          }
+        } else if (cat === 'masterprojekt') projEcts += m.ects;
+        else if (cat === 'wahlpflicht_major') wahlMajorEcts += m.ects;
+        else if (cat === 'wahl_inf') wahlInfEcts += m.ects;
+        else if (cat === 'wahl_wwf') wahlWwfEcts += m.ects;
+        else if (cat === 'masterarbeit') thesisEcts += m.ects;
+        else if (cat === 'minor') minorEcts += m.ects;
+      });
+
+      const majorTotal = pflichtEcts + projEcts + wahlMajorEcts + wahlInfEcts + wahlWwfEcts + thesisEcts;
+      const totalDegree = majorTotal + minorEcts;
+
+      const updateBadge = (statId, badgeId, current, target) => {
+        document.getElementById(statId).textContent = `${current} / ${target} ECTS`;
+        const badge = document.getElementById(badgeId);
+        const met = current === target;
+        badge.className = `text-xs font-bold px-2.5 py-1 rounded-full ${met ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`;
+        badge.textContent = met ? '✓ Satisfied' : 'Pending';
+      };
+
+      updateBadge('stat-total', 'badge-total', totalDegree, 120);
+      updateBadge('stat-major', 'badge-major', majorTotal, 90);
+      updateBadge('stat-minor', 'badge-minor', minorEcts, 30);
+
+      const a72Sections = [
+        { title: 'Pflichtmodul', subtitle: majorRule.pflichtModule, current: pflichtEcts, target: 6, valid: pflichtEcts >= 6 && hasSpecificPflicht, warning: !hasSpecificPflicht ? `Requires "${majorRule.pflichtModule}"` : null },
+        { title: 'Masterprojekt', subtitle: 'Masterprojektarbeit', current: projEcts, target: 15, valid: projEcts === 15 },
+        { title: 'Wahlpflichtbereich', subtitle: majorRule.wahlpflichtLabel, current: wahlMajorEcts, target: 18, valid: wahlMajorEcts >= 18 },
+        { title: 'Wahlbereich INF', subtitle: 'Informatik Wahlmodule', current: wahlInfEcts, target: 15, valid: wahlInfEcts >= 15 },
+        { title: 'Wahlbereich WWF', subtitle: 'WWF Fakultätswahl', current: wahlWwfEcts, target: 6, valid: wahlWwfEcts >= 6 },
+        { title: 'Masterarbeit', subtitle: 'Master Thesis', current: thesisEcts, target: 30, valid: thesisEcts === 30 }
+      ];
+
+      document.getElementById('a72Container').innerHTML = a72Sections.map(s => `
+        <div class="bg-white border ${s.valid ? 'border-emerald-300' : 'border-slate-200'} rounded-xl p-3 shadow-sm flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="text-xs font-bold text-slate-800 truncate" title="${s.title}">${s.title}</span>
+              <span class="text-[11px] font-bold ${s.valid ? 'text-emerald-700' : 'text-slate-500'}">${s.valid ? '✓' : `${s.current}/${s.target}`}</span>
+            </div>
+            <p class="text-[10px] text-slate-400 truncate mb-2" title="${s.subtitle}">${s.subtitle}</p>
+          </div>
+          <div>
+            <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden mb-1">
+              <div class="h-1.5 rounded-full ${s.valid ? 'bg-emerald-500' : 'bg-blue-600'}" style="width: ${Math.min(100, (s.current / s.target) * 100)}%"></div>
+            </div>
+            ${s.warning ? `<p class="text-[9px] text-amber-600 truncate font-semibold">${s.warning}</p>` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      for (let i = 1; i <= state.semesterCount; i++) {
+        const semId = `sem${i}`;
+        const colEcts = allModules.filter(m => state.placements[m.id] === semId).reduce((sum, m) => sum + m.ects, 0);
+        const el = document.getElementById(`${semId}-count`);
+        if (el) {
+          el.textContent = `${colEcts} / 30 ECTS`;
+          el.className = `text-xs font-semibold px-2.5 py-0.5 rounded-full ${colEcts === 30 ? 'bg-emerald-100 text-emerald-800' : (colEcts > 30 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600')}`;
+        }
+      }
+    }
+
+    // ==========================================
+    // CALENDAR VIEW & ICS EXPORTER
+    // ==========================================
+
+    function openCalendarModal(semNum) {
+      activeCalendarSem = semNum;
+      renderCalendarModal();
+      const modal = document.getElementById('calendarModal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeCalendarModal() {
+      const modal = document.getElementById('calendarModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function renderCalendarModal() {
+      const semNum = activeCalendarSem;
+      const semTerm = getSemesterTerm(semNum);
+      const semLabel = getTermName(semNum);
+
+      document.getElementById('calendarTitle').textContent = `Semester ${semNum} Timetable`;
+      document.getElementById('calendarTermBadge').textContent = semTerm;
+      document.getElementById('calendarTermBadge').className = `text-xs font-semibold px-2 py-0.5 rounded ${semTerm === 'HS' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`;
+      document.getElementById('calendarSubtext').textContent = `${semLabel} • Weekly lecture distribution, rooms & time slots`;
+
+      // Render Semester Tabs
+      const tabsContainer = document.getElementById('calendarSemesterTabs');
+      tabsContainer.innerHTML = '';
+      for (let i = 1; i <= state.semesterCount; i++) {
+        const btn = document.createElement('button');
+        btn.textContent = `Sem ${i}`;
+        btn.className = `px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${i === semNum ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`;
+        btn.onclick = () => {
+          activeCalendarSem = i;
+          renderCalendarModal();
+        };
+        tabsContainer.appendChild(btn);
+      }
+
+      // Clear Day Columns
+      const dayCols = document.querySelectorAll('.day-col');
+      dayCols.forEach(col => col.innerHTML = '');
+
+      // Get Active Semester Modules
+      const allModules = [...catalogue.modules, ...state.customModules];
+      const semModules = allModules.filter(m => state.placements[m.id] === `sem${semNum}`);
+
+      const unscheduledModules = [];
+      const clashes = computeScheduleClashes();
+
+      // Render Scheduled Time Blocks (08:00 = 480 min to 20:00 = 1200 min, span = 720 min)
+      semModules.forEach(mod => {
+        const catKey = getSelectedCategory(mod);
+        const style = categoryStyles[catKey] || categoryStyles.wahl_inf;
+        const slots = mod.time_slots || [];
+
+        if (slots.length === 0) {
+          unscheduledModules.push(mod);
+          return;
+        }
+
+        slots.forEach(slot => {
+          const dayCol = document.querySelector(`.day-col[data-day="${slot.day}"]`);
+          if (!dayCol) return;
+
+          // Normalize: Clamped between 08:00 and 20:00
+          const startMin = Math.max(480, slot.start_min);
+          const endMin = Math.min(1200, slot.end_min);
+          if (endMin <= startMin) return;
+
+          const topPercent = ((startMin - 480) / 720) * 100;
+          const heightPercent = ((endMin - startMin) / 720) * 100;
+
+          const isClashing = clashes[mod.id] && clashes[mod.id].some(c => c.day === slot.day);
+
+          const block = document.createElement('div');
+          block.className = `absolute left-1 right-1 rounded-lg p-2 border shadow-xs overflow-hidden flex flex-col justify-between transition-transform hover:scale-[1.01] hover:z-20 ${style.bg} ${isClashing ? 'ring-2 ring-amber-500 border-amber-500' : ''}`;
+          block.style.top = `${topPercent}%`;
+          block.style.height = `${Math.max(5, heightPercent)}%`;
+
+          const roomLabel = slot.room ? `📍 ${slot.room}` : '📍 TBA';
+
+          block.innerHTML = `
+            <div>
+              <div class="flex items-center justify-between gap-1 leading-tight">
+                <span class="font-bold text-[11px] truncate" title="${mod.name}">${mod.name}</span>
+                <span class="text-[10px] font-mono font-semibold shrink-0">${slot.start}</span>
+              </div>
+              <div class="text-[10px] font-medium text-slate-600 truncate mt-0.5">${roomLabel}</div>
+            </div>
+            <div class="flex items-center justify-between text-[9px] font-semibold mt-1">
+              <span class="truncate">${style.label}</span>
+              <span>${mod.ects} ECTS</span>
+            </div>
+          `;
+
+          dayCol.appendChild(block);
+        });
+      });
+
+      // Render Unscheduled Shelf
+      const unscheduledContainer = document.getElementById('unscheduledContainer');
+      const unscheduledSection = document.getElementById('unscheduledSection');
+      unscheduledContainer.innerHTML = '';
+
+      if (unscheduledModules.length === 0) {
+        unscheduledSection.classList.add('hidden');
+      } else {
+        unscheduledSection.classList.remove('hidden');
+        unscheduledModules.forEach(mod => {
+          const catKey = getSelectedCategory(mod);
+          const style = categoryStyles[catKey] || categoryStyles.wahl_inf;
+          const pill = document.createElement('div');
+          pill.className = `px-2.5 py-1.5 rounded-lg border flex items-center gap-2 bg-white ${style.bg}`;
+          pill.innerHTML = `
+            <span class="font-semibold text-slate-800">${mod.name}</span>
+            <span class="text-slate-500 text-[11px]">(${mod.ects} ECTS)</span>
+            <span class="text-[10px] font-bold px-1 py-0.2 rounded border bg-white/70">${style.label}</span>
+          `;
+          unscheduledContainer.appendChild(pill);
+        });
+      }
+    }
+
+    // Generate and Download RFC 5545 .ics Calendar File
+    function exportSemesterIcs(semNum) {
+      const allModules = [...catalogue.modules, ...state.customModules];
+      const semModules = allModules.filter(m => state.placements[m.id] === `sem${semNum}`);
+      const semTerm = getSemesterTerm(semNum);
+
+      // Representative UZH Semester Start Mondays:
+      // HS (Autumn): September 14, 2026
+      // FS (Spring): February 15, 2027
+      const baseYear = semTerm === 'HS' ? 2026 : 2027;
+      const baseMonth = semTerm === 'HS' ? 9 : 2; // Sept or Feb
+      const baseDay = semTerm === 'HS' ? 14 : 15; // Monday start
+
+      const dayOffsets = { 'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4, 'Sat': 5, 'Sun': 6 };
+
+      const formatIcsDate = (d, hour, min) => {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const h = String(hour).padStart(2, '0');
+        const m = String(min).padStart(2, '0');
+        return `${year}${month}${day}T${h}${m}00`;
+      };
+
+      const nowIso = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+      let icsContent = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//UZH Master Curriculum Planner//EN",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        `X-WR-CALNAME:UZH Semester ${semNum} (${semTerm})`
+      ];
+
+      let eventCount = 0;
+
+      semModules.forEach(mod => {
+        const slots = mod.time_slots || [];
+        const catKey = getSelectedCategory(mod);
+        const style = categoryStyles[catKey] || categoryStyles.wahl_inf;
+
+        slots.forEach((slot, sIdx) => {
+          const offset = dayOffsets[slot.day] || 0;
+          const firstDate = new Date(baseYear, baseMonth - 1, baseDay + offset);
+
+          const [sh, sm] = slot.start.split(':').map(Number);
+          const [eh, em] = slot.end.split(':').map(Number);
+
+          const dtStart = formatIcsDate(firstDate, sh, sm);
+          const dtEnd = formatIcsDate(firstDate, eh, em);
+
+          const location = slot.room ? `UZH Room ${slot.room}` : "University of Zurich";
+          const description = `Module: ${mod.name}\\nECTS: ${mod.ects}\\nCategory: ${style.label}\\nVVZ Link: ${mod.url || ''}`;
+
+          icsContent.push("BEGIN:VEVENT");
+          icsContent.push(`UID:UZH_${mod.id}_sem${semNum}_slot${sIdx}_${Date.now()}@planner.uzh`);
+          icsContent.push(`DTSTAMP:${nowIso}`);
+          icsContent.push(`DTSTART:${dtStart}`);
+          icsContent.push(`DTEND:${dtEnd}`);
+          icsContent.push("RRULE:FREQ=WEEKLY;COUNT=14"); // Standard 14 lecture weeks per semester
+          icsContent.push(`SUMMARY:${mod.name}`);
+          icsContent.push(`LOCATION:${location}`);
+          icsContent.push(`DESCRIPTION:${description}`);
+          icsContent.push("STATUS:CONFIRMED");
+          icsContent.push("END:VEVENT");
+          eventCount++;
+        });
+      });
+
+      icsContent.push("END:VCALENDAR");
+
+      if (eventCount === 0) {
+        alert(`No fixed lecture hours found for Semester ${semNum}. Modules in this semester may be thesis, projects, or self-scheduled.`);
+        return;
+      }
+
+      const blob = new Blob([icsContent.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `UZH_Semester_${semNum}_${semTerm}_Schedule.ics`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(link.href);
+    }
+
+    // Modal Event Listeners
+    document.getElementById('openGlobalCalendarBtn').addEventListener('click', () => openCalendarModal(1));
+    document.getElementById('closeCalendarBtn').addEventListener('click', closeCalendarModal);
+    document.getElementById('exportIcsBtn').addEventListener('click', () => exportSemesterIcs(activeCalendarSem));
+
+    majorSelect.addEventListener('change', (e) => {
+      state.selectedMajor = e.target.value;
+      persistState();
+      renderCards();
+      renderAudit();
+    });
+
+    minorSelect.addEventListener('change', (e) => {
+      state.selectedMinor = e.target.value;
+      persistState();
+      renderCards();
+      renderAudit();
+    });
+
+    document.getElementById('addSemesterBtn').addEventListener('click', () => {
+      state.semesterCount++;
+      persistState();
+      buildBoardDOM();
+      renderCards();
+      renderAudit();
+    });
+
+    document.getElementById('removeSemesterBtn').addEventListener('click', () => {
+      if (state.semesterCount <= 4) return;
+      const lastSemId = `sem${state.semesterCount}`;
+      Object.keys(state.placements).forEach(k => {
+        if (state.placements[k] === lastSemId) {
+          delete state.placements[k];
+          delete state.categoryOverrides[k];
+        }
+      });
+      state.semesterCount--;
+      persistState();
+      buildBoardDOM();
+      renderCards();
+      renderAudit();
+    });
+
+    const modal = document.getElementById('modal');
+    document.getElementById('addModuleBtn').addEventListener('click', () => {
+      document.getElementById('moduleForm').reset();
+      updateModalColumnSelect();
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    });
+
+    document.getElementById('cancelModalBtn').addEventListener('click', () => {
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    });
+
+    document.getElementById('moduleForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const schedText = document.getElementById('modSchedule').value.trim();
+      const newMod = {
+        id: 'CUSTOM_' + Date.now(),
+        sm_id: 'custom',
+        name: document.getElementById('modName').value.trim(),
+        ects: parseInt(document.getElementById('modEcts').value, 10),
+        term: document.getElementById('modTerm').value,
+        customCategory: document.getElementById('modCategory').value,
+        schedule_text: schedText,
+        time_slots: [],
+        url: 'https://studentservices.uzh.ch/uzh/anonym/vvz/index.html',
+        isCustom: true,
+        programs: {}
+      };
+
+      const initialCol = document.getElementById('modCol').value;
+      if (initialCol !== 'pool') state.placements[newMod.id] = initialCol;
+      state.customModules.push(newMod);
+
+      persistState();
+      renderCards();
+      renderAudit();
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    });
+
+    document.getElementById('reloadBtn').addEventListener('click', () => initApp());
+
+    initApp();
+  </script>
+</body>
+</html>
