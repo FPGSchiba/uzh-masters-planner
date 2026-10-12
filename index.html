@@ -6,24 +6,32 @@
   <title>UZH Master Curriculum Planner (WWF A7.2)</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    .drag-over { background-color: #f1f5f9; border-style: dashed; }
+    .drag-over { background-color: #eff6ff; border-color: #3b82f6 !important; border-style: dashed !important; }
+    .drag-invalid { background-color: #fef2f2 !important; border-color: #ef4444 !important; border-style: dashed !important; cursor: not-allowed !important; }
     .card-dragging { opacity: 0.35; }
     .kanban-scroll::-webkit-scrollbar { height: 8px; }
     .kanban-scroll::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
     .kanban-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .kanban-col::-webkit-scrollbar { width: 5px; }
+    .kanban-col::-webkit-scrollbar-track { background: transparent; }
+    .kanban-col::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .kanban-col::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen">
-  <div class="max-w-[1680px] mx-auto p-6">
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-2 max-w-sm pointer-events-none"></div>
+
+  <div class="w-full max-w-[1760px] mx-auto px-4 sm:px-6 py-4">
     
     <!-- Header & Program Switcher -->
-    <header class="flex flex-col md:flex-row md:items-center justify-between pb-6 border-b border-slate-200 gap-4">
+    <header class="flex flex-col lg:flex-row lg:items-center justify-between pb-4 border-b border-slate-200 gap-4">
       <div>
         <div class="flex items-center gap-2">
           <h1 class="text-2xl font-bold text-slate-900 tracking-tight">UZH Master Curriculum Planner</h1>
           <span id="saveStatus" class="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-mono">Synced</span>
         </div>
-        <p class="text-xs text-slate-500 mt-1">Regulated per <strong>WWF Studienordnung Anhang A7.2</strong> (90 Major + 30 Minor = 120 ECTS) • Weekly Calendar & .ics Export</p>
+        <p class="text-xs text-slate-500 mt-1">Regulated per <strong>WWF Studienordnung Anhang A7.2</strong> (90 Major + 30 Minor = 120 ECTS) • Filterable Course Catalogue</p>
       </div>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -38,7 +46,7 @@
         </div>
 
         <div class="flex items-center gap-2 self-end">
-          <button id="openGlobalCalendarBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5" title="Open weekly schedule view">
+          <button id="openGlobalCalendarBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 shadow-sm" title="Open weekly schedule view">
             <span>📅 Timetable</span>
           </button>
           <button id="addSemesterBtn" class="bg-slate-800 hover:bg-slate-900 text-white text-sm font-semibold px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1">
@@ -50,63 +58,93 @@
           <button id="addModuleBtn" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold px-4 py-1.5 rounded-lg transition-colors">
             + Add Module
           </button>
+          <!-- Prominent Orange Load Data Button -->
+          <button id="refreshDataBtn" class="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white text-sm font-bold px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 shadow-sm border border-amber-600 group" title="Fetch latest course catalogue from UZH VVZ">
+            <svg id="refreshIcon" class="w-4 h-4 text-white group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
+            <span id="refreshBtnLabel">Load Data</span>
+          </button>
         </div>
       </div>
     </header>
 
-    <!-- Global Clash Warning Bar -->
-    <div id="clashWarningBanner" class="hidden my-4 p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-medium flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <span class="text-base">⚠</span>
-        <span id="clashWarningText">Schedule conflicts detected in your timeline.</span>
+    <!-- Centered Empty State (When no course data is loaded) -->
+    <div id="emptyCatalogueScreen" class="hidden min-h-[55vh] flex flex-col items-center justify-center text-center p-8 max-w-lg mx-auto my-12 bg-white rounded-2xl border border-slate-200/90 shadow-sm">
+      <div class="w-16 h-16 rounded-2xl bg-amber-50 text-amber-500 border border-amber-200 flex items-center justify-center mb-4 text-3xl shadow-2xs">
+        📚
       </div>
-      <span class="text-[11px] text-amber-700 font-semibold">Review highlighted semester cards or open Timetable</span>
+      <h2 class="text-xl font-bold text-slate-900 mb-2">Keine Moduldaten geladen</h2>
+      <p class="text-xs text-slate-500 mb-6 leading-relaxed max-w-sm">
+        Es wurden noch keine Lehrveranstaltungen aus dem UZH Vorlesungsverzeichnis (VVZ) geladen. Klicke auf den Button, um alle Module, Räume und Zeitpläne abzurufen.
+      </p>
+      <button id="emptyLoadDataBtn" class="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold text-sm px-6 py-3 rounded-xl shadow-md hover:shadow-lg transition-all flex items-center gap-2 transform active:scale-95 group">
+        <svg class="w-4 h-4 text-white group-hover:rotate-90 transition-transform duration-300" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </svg>
+        <span>UZH Daten laden (Load Data)</span>
+      </button>
     </div>
 
-    <!-- Degree Summary Cards -->
-    <div class="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
-      <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
-        <div>
-          <span class="text-xs text-slate-500 block">Total Degree Workload</span>
-          <span class="text-lg font-bold text-slate-900" id="stat-total">0 / 120 ECTS</span>
+    <!-- Main Planner Content Container -->
+    <div id="plannerMainContent">
+      <!-- Global Clash Warning Bar -->
+      <div id="clashWarningBanner" class="hidden my-4 p-3.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-medium flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-base">⚠️</span>
+          <span id="clashWarningText">Schedule conflicts detected in your timeline.</span>
         </div>
-        <div id="badge-total" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
+        <button id="bannerOpenTimetableBtn" class="text-[11px] text-amber-800 hover:text-amber-950 font-bold underline flex items-center gap-1">
+          <span>Review highlighted cards or open Timetable ➔</span>
+        </button>
       </div>
 
-      <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
-        <div>
-          <span class="text-xs text-slate-500 block" id="label-major-stat">Major Studienprogramm</span>
-          <span class="text-lg font-bold text-slate-900" id="stat-major">0 / 90 ECTS</span>
+      <!-- Degree Summary Cards -->
+      <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <span class="text-xs text-slate-500 block">Total Degree Workload</span>
+            <span class="text-lg font-bold text-slate-900" id="stat-total">0 / 120 ECTS</span>
+          </div>
+          <div id="badge-total" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
         </div>
-        <div id="badge-major" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
-      </div>
 
-      <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
-        <div>
-          <span class="text-xs text-slate-500 block" id="label-minor-stat">Minor Studienprogramm</span>
-          <span class="text-lg font-bold text-slate-900" id="stat-minor">0 / 30 ECTS</span>
+        <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <span class="text-xs text-slate-500 block" id="label-major-stat">Major Studienprogramm</span>
+            <span class="text-lg font-bold text-slate-900" id="stat-major">0 / 90 ECTS</span>
+          </div>
+          <div id="badge-major" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
         </div>
-        <div id="badge-minor" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
+
+        <div class="bg-white p-3.5 rounded-xl border border-slate-200 flex items-center justify-between">
+          <div>
+            <span class="text-xs text-slate-500 block" id="label-minor-stat">Minor Studienprogramm</span>
+            <span class="text-lg font-bold text-slate-900" id="stat-minor">0 / 30 ECTS</span>
+          </div>
+          <div id="badge-minor" class="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">Pending</div>
+        </div>
       </div>
-    </div>
 
-    <!-- Detailed A7.2 Audit Dashboard -->
-    <div class="my-5">
-      <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">A7.2 Major Module Verification Breakdown</h2>
-      <div class="grid grid-cols-2 md:grid-cols-6 gap-3" id="a72Container"></div>
-    </div>
-
-    <!-- Kanban Grid -->
-    <main class="kanban-scroll flex gap-4 overflow-x-auto pb-4 items-start" id="boardContainer"></main>
-
-    <!-- Footer -->
-    <div class="mt-6 flex justify-between items-center text-xs text-slate-500">
-      <div class="flex items-center gap-4">
-        <span>Terms: <span class="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">HS = Autumn</span> <span class="text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">FS = Spring</span> <span class="text-slate-600 font-semibold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">HS / FS = Both</span></span>
-        <span>• Click <strong>📅 Timetable</strong> on any semester to inspect weekly hours and download <strong>.ics</strong> files.</span>
+      <!-- Detailed A7.2 Audit Dashboard -->
+      <div class="my-3.5">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">A7.2 Major Module Verification Breakdown</h2>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5" id="a72Container"></div>
       </div>
-      <button id="reloadBtn" class="hover:text-blue-600 underline font-medium">Reload from Server</button>
-    </div>
+
+      <!-- Kanban Board (Catalogue Sidebar + Responsive Semesters Grid) -->
+      <main class="flex flex-col lg:flex-row gap-4 items-start w-full" id="boardContainer"></main>
+
+      <!-- Footer -->
+      <div class="mt-6 flex justify-between items-center text-xs text-slate-500">
+        <div class="flex items-center gap-4 flex-wrap">
+          <span>Terms: <span class="text-amber-700 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">HS = Autumn</span> <span class="text-emerald-700 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">FS = Spring</span> <span class="text-slate-600 font-semibold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">HS/FS = Both</span></span>
+          <span>Campuses: <span class="bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.5 rounded font-medium">Oerlikon</span> <span class="bg-violet-50 text-violet-700 border border-violet-200 px-1.5 py-0.5 rounded font-medium">Zentrum</span> <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-medium">Irchel</span> <span class="bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded font-medium">Schlieren</span></span>
+          <span>• Star (★) modules to save favorites • Click 📅 <strong>Timetable</strong> to inspect weekly calendar & export <strong>.ics</strong> files.</span>
+        </div>
+        <button id="reloadBtn" class="hover:text-blue-600 underline font-medium">Reload from Server</button>
+      </div>
+    </div><!-- /plannerMainContent -->
   </div>
 
   <!-- Modal: Calendar / Timetable View -->
@@ -122,7 +160,7 @@
               <h3 class="text-lg font-bold text-slate-900" id="calendarTitle">Semester Timetable</h3>
               <span id="calendarTermBadge" class="text-xs font-semibold px-2 py-0.5 rounded bg-slate-200 text-slate-700">HS</span>
             </div>
-            <p class="text-xs text-slate-500" id="calendarSubtext">Weekly lecture distribution and room allocations</p>
+            <p class="text-xs text-slate-500" id="calendarSubtext">Weekly lecture distribution, campus locations & room allocations</p>
           </div>
         </div>
 
@@ -154,7 +192,7 @@
             <div>Friday</div>
           </div>
 
-          <!-- Time Grid Container (08:00 to 20:00 = 12 Hours) -->
+          <!-- Time Grid Container (08:00 to 20:00 = 12 Hours = 720 Minutes) -->
           <div class="relative grid grid-cols-6" style="height: 660px;">
             
             <!-- Time Axis Column (08:00 to 20:00) -->
@@ -185,7 +223,7 @@
 
         <!-- Unscheduled / Flexible Modules Shelf -->
         <div id="unscheduledSection" class="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50">
-          <h4 class="text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Flexible / By Arrangement (Thesis, Projects, Individual Study)</h4>
+          <h4 class="text-xs font-bold text-slate-600 mb-2 uppercase tracking-wider">Flexible / By Arrangement (Thesis, Projects, Seminars)</h4>
           <div id="unscheduledContainer" class="flex flex-wrap gap-2 text-xs"></div>
         </div>
       </div>
@@ -203,19 +241,33 @@
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1">Lecture Time Slot & Room (Optional)</label>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Schedule / Time Slot & Room</label>
           <input type="text" id="modSchedule" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="e.g., Do 10:15 - 12:00, Raum: BIN-2.A.01">
         </div>
 
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Campus (Optional)</label>
+            <select id="modCampus" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium">
+              <option value="">None / Not specified</option>
+              <option value="Oerlikon">Oerlikon</option>
+              <option value="Zentrum">Zentrum</option>
+              <option value="Irchel">Irchel</option>
+              <option value="Schlieren">Schlieren</option>
+              <option value="Online">Online</option>
+            </select>
+          </div>
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">ECTS Credits</label>
             <input type="number" id="modEcts" required min="1" max="30" value="6" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none">
           </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Offered In</label>
             <select id="modTerm" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium">
-              <option value="both" selected>Both (HS/FS)</option>
+              <option value="both">Both (HS & FS)</option>
               <option value="HS">Autumn (HS)</option>
               <option value="FS">Spring (FS)</option>
             </select>
@@ -223,55 +275,128 @@
           <div>
             <label class="block text-xs font-semibold text-slate-600 mb-1">Category</label>
             <select id="modCategory" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium">
-              <option value="pflicht">Pflichtmodul (6)</option>
-              <option value="masterprojekt">Projekt (15)</option>
-              <option value="wahlpflicht_major" selected>Wahlpflicht (18)</option>
-              <option value="wahl_inf">Wahl INF (15)</option>
-              <option value="wahl_wwf">Wahl WWF (6)</option>
-              <option value="masterarbeit">Thesis (30)</option>
-              <option value="minor">Minor (30)</option>
+              <option value="pflicht">Pflichtmodul (Major)</option>
+              <option value="wahlpflicht_major">Wahlpflicht (Major)</option>
+              <option value="wahl_inf">Wahlbereich INF</option>
+              <option value="wahl_wwf">Wahlbereich WWF</option>
+              <option value="masterprojekt">Masterprojekt (15 ECTS)</option>
+              <option value="masterarbeit">Masterarbeit (30 ECTS)</option>
+              <option value="minor">Minor-Programm</option>
             </select>
           </div>
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1">Initial Column</label>
-          <select id="modCol" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none"></select>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Initial Target Column</label>
+          <select id="modCol" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium">
+            <option value="pool">Course Catalogue</option>
+          </select>
         </div>
 
-        <div class="flex justify-end gap-2 pt-2">
-          <button type="button" id="cancelModalBtn" class="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-          <button type="submit" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">Save Module</button>
+        <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+          <button type="button" id="cancelModalBtn" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800">Cancel</button>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold px-4 py-2 rounded-lg">Add Module</button>
         </div>
       </form>
     </div>
   </div>
 
+  <!-- Modal: Crawler Progress & Status -->
+  <div id="refreshModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden items-center justify-center p-4 z-50 transition-opacity">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border border-slate-100 flex flex-col gap-4">
+      
+      <!-- Modal Header -->
+      <div class="flex items-start justify-between">
+        <div class="flex items-center gap-3">
+          <div id="refreshStatusIconContainer" class="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <svg id="refreshSpinner" class="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900" id="refreshModalTitle">Fetching VVZ Course Catalogue</h3>
+            <p class="text-xs text-slate-500" id="refreshModalSubtitle">Connecting to UZH OData Service...</p>
+          </div>
+        </div>
+        <button id="closeRefreshModalBtn" class="text-slate-400 hover:text-slate-600 text-sm p-1 rounded-lg hover:bg-slate-100 hidden">✕</button>
+      </div>
+
+      <!-- Progress Bar Container -->
+      <div class="space-y-1.5">
+        <div class="flex justify-between text-xs font-semibold">
+          <span class="text-slate-700" id="refreshStageLabel">Initializing...</span>
+          <span class="text-amber-600 font-mono" id="refreshPercentLabel">0%</span>
+        </div>
+        <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden p-0.5 border border-slate-200">
+          <div id="refreshProgressBar" class="bg-gradient-to-r from-amber-500 to-orange-500 h-full rounded-full transition-all duration-300 ease-out" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- Live Terminal Console -->
+      <div>
+        <label class="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Crawl Activity Log</label>
+        <div id="refreshLogConsole" class="bg-slate-950 text-slate-300 font-mono text-[11px] p-3 rounded-xl h-44 overflow-y-auto space-y-1 leading-relaxed border border-slate-800 shadow-inner select-text">
+          <div class="text-slate-500">// Ready to trigger live synchronization...</div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-100">
+        <button id="cancelRefreshBtn" class="px-4 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
+    // Regulations according to WWF Studienordnung Anhang A7.2
     const MAJOR_RULES = {
-      "CG51087486": { pflichtModule: "Advanced Topics in Artificial Intelligence", wahlpflichtLabel: "Wahlpflicht INF AI" },
-      "CG51087487": { pflichtModule: "Foundations of Data Science", wahlpflichtLabel: "Wahlpflicht INF DS" },
-      "CG51087484": { pflichtModule: "Fundamentals of Software Systems", wahlpflichtLabel: "Wahlpflicht INF SOSY" },
-      "CG51087283": { pflichtModule: "Information Management", wahlpflichtLabel: "Wahlpflicht INF IS" },
-      "CG51087485": { pflichtModule: "Fundamentals of People-Oriented Computing", wahlpflichtLabel: "Wahlpflicht INF POC" }
+      "CG51087486": { name: "Artificial Intelligence", pflichtModule: "Advanced Topics in Artificial Intelligence", wahlpflichtLabel: "Wahlpflicht INF AI" },
+      "CG51087487": { name: "Data Science", pflichtModule: "Foundations of Data Science", wahlpflichtLabel: "Wahlpflicht INF DS" },
+      "CG51087484": { name: "Information Systems", pflichtModule: "Information Management", wahlpflichtLabel: "Wahlpflicht INF IS" },
+      "CG51087283": { name: "Software Systems", pflichtModule: "Software Engineering", wahlpflichtLabel: "Wahlpflicht INF SE" },
+      "CG51087485": { name: "People-Oriented Computing", pflichtModule: "Advanced Topics in Human-Computer Interaction", wahlpflichtLabel: "Wahlpflicht INF POC" }
     };
 
     const categoryStyles = {
-      pflicht: { label: 'Pflichtmodul', bg: 'bg-emerald-50 text-emerald-800 border-emerald-300' },
+      pflicht: { label: 'Pflichtmodul', bg: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
       masterprojekt: { label: 'Masterprojekt', bg: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-      wahlpflicht_major: { label: 'Wahlpflicht Major', bg: 'bg-blue-50 text-blue-700 border-blue-200' },
-      wahl_inf: { label: 'Wahl INF', bg: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
-      wahl_wwf: { label: 'Wahl WWF', bg: 'bg-amber-50 text-amber-700 border-amber-200' },
-      masterarbeit: { label: 'Masterarbeit', bg: 'bg-purple-50 text-purple-700 border-purple-200' },
+      wahlpflicht_major: { label: 'Wahlpflicht (Major)', bg: 'bg-blue-50 text-blue-700 border-blue-200' },
+      wahl_inf: { label: 'Wahl INF', bg: 'bg-sky-50 text-sky-700 border-sky-200' },
+      wahl_wwf: { label: 'Wahl WWF', bg: 'bg-purple-50 text-purple-700 border-purple-200' },
+      masterarbeit: { label: 'Masterarbeit', bg: 'bg-amber-50 text-amber-700 border-amber-200' },
       minor: { label: 'Minor', bg: 'bg-rose-50 text-rose-700 border-rose-200' }
     };
 
-    let catalogue = { majors: [], minors: [], modules: [] };
-    let state = { selectedMajor: "", selectedMinor: "", semesterCount: 4, placements: {}, categoryOverrides: {}, customModules: [] };
+    const campusStyles = {
+      'Oerlikon': { label: 'Oerlikon', bg: 'bg-sky-50 text-sky-700 border-sky-200' },
+      'Zentrum': { label: 'Zentrum', bg: 'bg-violet-50 text-violet-700 border-violet-200' },
+      'Irchel': { label: 'Irchel', bg: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+      'Schlieren': { label: 'Schlieren', bg: 'bg-amber-50 text-amber-700 border-amber-200' },
+      'Online': { label: 'Online', bg: 'bg-slate-100 text-slate-700 border-slate-200' }
+    };
 
+    let catalogue = { majors: [], minors: [], modules: [] };
+    let state = {
+      selectedMajor: "",
+      selectedMinor: "",
+      semesterCount: 4,
+      placements: {},
+      categoryOverrides: {},
+      customModules: [],
+      starredModules: []
+    };
+
+    // Filter and search state
     let catalogueSearchQuery = "";
     let catalogueTermFilter = "all";
     let catalogueCatFilter = "all";
+    let catalogueCampusFilter = "all";
+    let catalogueStarredOnly = false;
+    let isCatalogueCollapsed = false;
+    let currentlyDraggedModId = null;
     let activeCalendarSem = 1;
 
     const majorSelect = document.getElementById('majorSelect');
@@ -280,20 +405,40 @@
     function getSemesterTerm(semNum) { return semNum % 2 !== 0 ? 'HS' : 'FS'; }
     function getTermName(semNum) { return semNum % 2 !== 0 ? 'Autumn (HS)' : 'Spring (FS)'; }
 
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      const bg = type === 'error'
+        ? 'bg-red-800 text-white border-red-900 shadow-xl'
+        : (type === 'warning' ? 'bg-amber-800 text-white border-amber-900 shadow-xl' : 'bg-slate-900 text-white border-slate-800 shadow-lg');
+      
+      toast.className = `pointer-events-auto flex items-start gap-2.5 px-3.5 py-2.5 rounded-xl border text-xs font-medium backdrop-blur-sm transition-all duration-300 translate-y-[-10px] opacity-0 ${bg}`;
+      toast.innerHTML = `
+        <span class="text-sm shrink-0">${type === 'error' ? '🚫' : (type === 'warning' ? '⚠️' : 'ℹ️')}</span>
+        <span class="leading-snug">${message}</span>
+      `;
+      container.appendChild(toast);
+      
+      requestAnimationFrame(() => {
+        toast.classList.remove('translate-y-[-10px]', 'opacity-0');
+      });
+
+      setTimeout(() => {
+        toast.classList.add('opacity-0', 'translate-y-[-10px]');
+        setTimeout(() => toast.remove(), 300);
+      }, 4200);
+    }
+
     function setSaveStatus(status) {
       const el = document.getElementById('saveStatus');
       if (status === 'saving') {
         el.textContent = 'Saving...';
         el.className = 'text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded border border-amber-200 font-mono';
       } else if (status === 'saved') {
-        el.textContent = 'Saved to JSON';
-        el.className = 'text-xs bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-mono';
-        setTimeout(() => {
-          el.textContent = 'Synced';
-          el.className = 'text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-mono';
-        }, 1500);
+        el.textContent = 'Synced';
+        el.className = 'text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded border border-slate-200 font-mono';
       } else {
-        el.textContent = 'Save Failed';
+        el.textContent = 'Error';
         el.className = 'text-xs bg-red-50 text-red-700 px-2 py-0.5 rounded border border-red-200 font-mono';
       }
     }
@@ -315,26 +460,74 @@
 
     async function initApp() {
       try {
-        const [catRes, stateRes] = await Promise.all([
-          fetch('/catalogue.json'),
-          fetch('/api/state')
-        ]);
-        catalogue = await catRes.json();
-        state = await stateRes.json();
+        // Safe fetch of catalogue.json
+        try {
+          const catRes = await fetch('/catalogue.json?t=' + Date.now());
+          if (catRes.ok) {
+            catalogue = await catRes.json();
+          } else {
+            catalogue = { majors: [], minors: [], modules: [] };
+          }
+        } catch (e) {
+          catalogue = { majors: [], minors: [], modules: [] };
+        }
+
+        // Safe fetch of state
+        try {
+          const stateRes = await fetch('/api/state?t=' + Date.now());
+          if (stateRes.ok) {
+            state = await stateRes.json();
+          }
+        } catch (e) {
+          console.warn('Could not load server state, using defaults');
+        }
+
         if (!state.categoryOverrides) state.categoryOverrides = {};
+        if (!state.starredModules) state.starredModules = [];
+        if (!state.customModules) state.customModules = [];
 
-        majorSelect.innerHTML = catalogue.majors.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
-        minorSelect.innerHTML = catalogue.minors.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+        const hasModules = catalogue && Array.isArray(catalogue.modules) && catalogue.modules.length > 0;
+        const emptyScreen = document.getElementById('emptyCatalogueScreen');
+        const mainContent = document.getElementById('plannerMainContent');
 
-        if (state.selectedMajor && catalogue.majors.some(m => m.id === state.selectedMajor)) {
+        if (!hasModules) {
+          if (emptyScreen) {
+            emptyScreen.classList.remove('hidden');
+            emptyScreen.classList.add('flex');
+          }
+          if (mainContent) {
+            mainContent.classList.add('hidden');
+          }
+          majorSelect.innerHTML = '<option value="">No data loaded</option>';
+          minorSelect.innerHTML = '<option value="">No data loaded</option>';
+          majorSelect.disabled = true;
+          minorSelect.disabled = true;
+          return;
+        }
+
+        // We have modules: Show planner, hide empty screen
+        if (emptyScreen) {
+          emptyScreen.classList.add('hidden');
+          emptyScreen.classList.remove('flex');
+        }
+        if (mainContent) {
+          mainContent.classList.remove('hidden');
+        }
+        majorSelect.disabled = false;
+        minorSelect.disabled = false;
+
+        majorSelect.innerHTML = (catalogue.majors || []).map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+        minorSelect.innerHTML = (catalogue.minors || []).map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+
+        if (state.selectedMajor && (catalogue.majors || []).some(m => m.id === state.selectedMajor)) {
           majorSelect.value = state.selectedMajor;
-        } else {
+        } else if (majorSelect.options.length > 0) {
           state.selectedMajor = majorSelect.value;
         }
 
-        if (state.selectedMinor && catalogue.minors.some(m => m.id === state.selectedMinor)) {
+        if (state.selectedMinor && (catalogue.minors || []).some(m => m.id === state.selectedMinor)) {
           minorSelect.value = state.selectedMinor;
-        } else {
+        } else if (minorSelect.options.length > 0) {
           state.selectedMinor = minorSelect.value;
         }
 
@@ -350,93 +543,197 @@
       const board = document.getElementById('boardContainer');
       board.innerHTML = '';
 
+      const starredCount = (state.starredModules || []).length;
+
       // Course Catalogue Column
       const poolCol = document.createElement('div');
-      poolCol.className = 'w-80 shrink-0 flex flex-col bg-slate-100/70 border border-slate-200 rounded-xl p-3 min-h-[550px]';
-      poolCol.innerHTML = `
-        <div class="flex items-center justify-between mb-2 px-1">
-          <div>
-            <h2 class="font-bold text-sm text-slate-800">Course Catalogue</h2>
-            <span id="pool-subtext" class="text-[11px] text-slate-400">Available Modules</span>
-          </div>
-          <span id="pool-count" class="text-xs bg-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">0 (0 ECTS)</span>
-        </div>
+      poolCol.id = 'catalogueCol';
 
-        <div class="space-y-1.5 mb-3 px-0.5">
-          <div class="relative">
-            <input type="text" id="catalogueSearch" placeholder="Search by name, ID, schedule..." 
-              value="${catalogueSearchQuery}"
-              class="w-full bg-white border border-slate-200 text-xs rounded-lg pl-7 pr-2 py-1.5 focus:ring-1 focus:ring-blue-500 focus:outline-none placeholder-slate-400">
-            <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+      if (isCatalogueCollapsed) {
+        poolCol.className = 'w-full lg:w-10 xl:w-11 shrink-0 flex lg:flex-col items-center justify-between lg:justify-start py-3 px-3 lg:px-1.5 bg-white border border-slate-200/90 rounded-xl cursor-pointer hover:border-slate-300 hover:bg-slate-50 shadow-2xs transition-all min-h-0 lg:self-stretch select-none group';
+        poolCol.title = 'Click to expand Course Catalogue';
+        poolCol.innerHTML = `
+          <div class="flex lg:flex-col items-center justify-center w-7 h-7 rounded-lg bg-slate-100 group-hover:bg-blue-50 group-hover:text-blue-600 text-slate-500 transition-colors">
+            <svg class="w-4 h-4 hidden lg:block transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
             </svg>
+            <span class="lg:hidden text-xs font-bold flex items-center gap-1.5">
+              <span>▼</span>
+              <span>Course Catalogue</span>
+            </span>
           </div>
-          <div class="grid grid-cols-2 gap-1.5">
-            <select id="catalogueTermFilter" class="bg-white border border-slate-200 text-[11px] rounded-md px-1.5 py-1 focus:outline-none text-slate-600 font-medium">
-              <option value="all" ${catalogueTermFilter === 'all' ? 'selected' : ''}>All Terms</option>
-              <option value="HS" ${catalogueTermFilter === 'HS' ? 'selected' : ''}>Autumn (HS)</option>
-              <option value="FS" ${catalogueTermFilter === 'FS' ? 'selected' : ''}>Spring (FS)</option>
-              <option value="both" ${catalogueTermFilter === 'both' ? 'selected' : ''}>Both (HS/FS)</option>
-            </select>
-            <select id="catalogueCatFilter" class="bg-white border border-slate-200 text-[11px] rounded-md px-1.5 py-1 focus:outline-none text-slate-600 font-medium">
-              <option value="all" ${catalogueCatFilter === 'all' ? 'selected' : ''}>All Categories</option>
-              <option value="pflicht" ${catalogueCatFilter === 'pflicht' ? 'selected' : ''}>Pflichtmodul</option>
-              <option value="wahlpflicht_major" ${catalogueCatFilter === 'wahlpflicht_major' ? 'selected' : ''}>Wahlpflicht</option>
-              <option value="wahl_inf" ${catalogueCatFilter === 'wahl_inf' ? 'selected' : ''}>Wahl INF</option>
-              <option value="wahl_wwf" ${catalogueCatFilter === 'wahl_wwf' ? 'selected' : ''}>Wahl WWF</option>
-              <option value="masterprojekt" ${catalogueCatFilter === 'masterprojekt' ? 'selected' : ''}>Masterprojekt</option>
-              <option value="masterarbeit" ${catalogueCatFilter === 'masterarbeit' ? 'selected' : ''}>Masterarbeit</option>
-              <option value="minor" ${catalogueCatFilter === 'minor' ? 'selected' : ''}>Minor</option>
-            </select>
+
+          <div class="hidden lg:flex flex-col items-center flex-1 justify-center py-6 gap-3">
+            <span class="[writing-mode:vertical-rl] rotate-180 text-xs font-semibold text-slate-600 tracking-wide uppercase group-hover:text-slate-900 transition-colors">
+              Course Catalogue
+            </span>
+            <span id="pool-count-collapsed" class="text-[10px] font-mono font-bold bg-slate-100 text-slate-600 group-hover:bg-blue-100 group-hover:text-blue-800 px-1.5 py-0.5 rounded-md transition-colors" title="Available modules">
+              0
+            </span>
           </div>
-        </div>
 
-        <div id="col-pool" class="kanban-col flex-1 space-y-2.5 overflow-y-auto max-h-[700px] pr-1" data-col="pool"></div>
-      `;
-      board.appendChild(poolCol);
+          <span class="lg:hidden text-[11px] font-bold bg-slate-100 px-2 py-0.5 rounded-full text-slate-600">
+            <span id="pool-count-collapsed-mobile">0</span> modules
+          </span>
+          <div id="col-pool" class="hidden" data-col="pool"></div>
+        `;
+        poolCol.addEventListener('click', () => {
+          isCatalogueCollapsed = false;
+          buildBoardDOM();
+          renderCards();
+        });
+        board.appendChild(poolCol);
+      } else {
+        poolCol.className = 'w-full lg:w-[330px] xl:w-[350px] shrink-0 flex flex-col bg-slate-100/70 border border-slate-200 rounded-xl p-3 min-h-[550px] transition-all';
+        poolCol.innerHTML = `
+          <div class="flex items-center justify-between gap-2 mb-2.5 px-0.5">
+            <div class="flex items-baseline gap-1.5 min-w-0">
+              <h2 class="font-bold text-sm text-slate-900 shrink-0">Course Catalogue</h2>
+              <span id="pool-subtext" class="text-[11px] text-slate-400 font-medium">Available</span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span id="pool-count" class="text-[11px] bg-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full whitespace-nowrap">0</span>
+              <button id="collapseCatalogueBtn" class="text-xs text-slate-400 hover:text-slate-700 hover:bg-slate-200/80 p-1 rounded transition-colors leading-none" title="Collapse catalogue to focus on semesters">
+                ◀
+              </button>
+            </div>
+          </div>
 
-      poolCol.querySelector('#catalogueSearch').addEventListener('input', (e) => {
-        catalogueSearchQuery = e.target.value.toLowerCase().trim();
-        renderCards();
-      });
-      poolCol.querySelector('#catalogueTermFilter').addEventListener('change', (e) => {
-        catalogueTermFilter = e.target.value;
-        renderCards();
-      });
-      poolCol.querySelector('#catalogueCatFilter').addEventListener('change', (e) => {
-        catalogueCatFilter = e.target.value;
-        renderCards();
-      });
+          <!-- Search & Filter Controls -->
+          <div class="space-y-1.5 mb-3 px-0.5">
+            <!-- Search input -->
+            <div class="relative">
+              <input type="text" id="catalogueSearch" placeholder="Search by name, ID, schedule, campus..." 
+                value="${catalogueSearchQuery}"
+                class="w-full bg-white border border-slate-200 text-xs rounded-lg pl-7 pr-2 py-1.5 focus:ring-1 focus:ring-blue-500 focus:outline-none placeholder-slate-400">
+              <svg class="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+              </svg>
+            </div>
+
+            <!-- Filter Dropdowns Row 1: Term & Category -->
+            <div class="grid grid-cols-2 gap-1.5">
+              <select id="catalogueTermFilter" class="w-full bg-white border border-slate-200 text-[11px] rounded-md px-1.5 py-1 focus:outline-none text-slate-600 font-medium">
+                <option value="all" ${catalogueTermFilter === 'all' ? 'selected' : ''}>All Terms</option>
+                <option value="HS" ${catalogueTermFilter === 'HS' ? 'selected' : ''}>Autumn (HS)</option>
+                <option value="FS" ${catalogueTermFilter === 'FS' ? 'selected' : ''}>Spring (FS)</option>
+                <option value="both" ${catalogueTermFilter === 'both' ? 'selected' : ''}>Both (HS/FS)</option>
+              </select>
+              <select id="catalogueCatFilter" class="w-full bg-white border border-slate-200 text-[11px] rounded-md px-1.5 py-1 focus:outline-none text-slate-600 font-medium">
+                <option value="all" ${catalogueCatFilter === 'all' ? 'selected' : ''}>All Categories</option>
+                <option value="pflicht" ${catalogueCatFilter === 'pflicht' ? 'selected' : ''}>Pflichtmodul</option>
+                <option value="wahlpflicht_major" ${catalogueCatFilter === 'wahlpflicht_major' ? 'selected' : ''}>Wahlpflicht</option>
+                <option value="wahl_inf" ${catalogueCatFilter === 'wahl_inf' ? 'selected' : ''}>Wahl INF</option>
+                <option value="wahl_wwf" ${catalogueCatFilter === 'wahl_wwf' ? 'selected' : ''}>Wahl WWF</option>
+                <option value="masterprojekt" ${catalogueCatFilter === 'masterprojekt' ? 'selected' : ''}>Masterprojekt</option>
+                <option value="masterarbeit" ${catalogueCatFilter === 'masterarbeit' ? 'selected' : ''}>Masterarbeit</option>
+                <option value="minor" ${catalogueCatFilter === 'minor' ? 'selected' : ''}>Minor</option>
+              </select>
+            </div>
+
+            <!-- Filter Row 2: Campus & Starred Toggle -->
+            <div class="grid grid-cols-2 gap-1.5 items-center">
+              <select id="catalogueCampusFilter" class="w-full bg-white border border-slate-200 text-[11px] rounded-md px-1.5 py-1 focus:outline-none text-slate-600 font-medium">
+                <option value="all" ${catalogueCampusFilter === 'all' ? 'selected' : ''}>All Campuses</option>
+                <option value="Oerlikon" ${catalogueCampusFilter === 'Oerlikon' ? 'selected' : ''}>📍 Oerlikon</option>
+                <option value="Zentrum" ${catalogueCampusFilter === 'Zentrum' ? 'selected' : ''}>📍 Zentrum</option>
+                <option value="Irchel" ${catalogueCampusFilter === 'Irchel' ? 'selected' : ''}>📍 Irchel</option>
+                <option value="Schlieren" ${catalogueCampusFilter === 'Schlieren' ? 'selected' : ''}>📍 Schlieren</option>
+                <option value="Online" ${catalogueCampusFilter === 'Online' ? 'selected' : ''}>🌐 Online</option>
+              </select>
+
+              <button id="catalogueStarredToggle" class="w-full text-[11px] font-semibold rounded-md py-1 px-1.5 border flex items-center justify-center gap-1 transition-colors ${catalogueStarredOnly ? 'bg-amber-100 text-amber-900 border-amber-300 shadow-2xs' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}">
+                <span class="${catalogueStarredOnly ? 'text-amber-600' : 'text-slate-400'}">★</span>
+                <span>Starred</span>
+                <span id="starredCountBadge" class="text-[10px] px-1 rounded-full font-mono ${catalogueStarredOnly ? 'bg-amber-200 text-amber-950 font-bold' : 'bg-slate-100 text-slate-500'}">${starredCount}</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="col-pool" class="kanban-col flex-1 space-y-2.5 overflow-y-auto max-h-[calc(100vh-270px)] min-h-[480px] pr-1" data-col="pool"></div>
+        `;
+        board.appendChild(poolCol);
+
+        poolCol.querySelector('#catalogueSearch').addEventListener('input', (e) => {
+          catalogueSearchQuery = e.target.value.toLowerCase().trim();
+          renderCards();
+        });
+
+        poolCol.querySelector('#catalogueTermFilter').addEventListener('change', (e) => {
+          catalogueTermFilter = e.target.value;
+          renderCards();
+        });
+
+        poolCol.querySelector('#catalogueCatFilter').addEventListener('change', (e) => {
+          catalogueCatFilter = e.target.value;
+          renderCards();
+        });
+
+        poolCol.querySelector('#catalogueCampusFilter').addEventListener('change', (e) => {
+          catalogueCampusFilter = e.target.value;
+          renderCards();
+        });
+
+        poolCol.querySelector('#collapseCatalogueBtn').addEventListener('click', (e) => {
+          e.stopPropagation();
+          isCatalogueCollapsed = true;
+          buildBoardDOM();
+          renderCards();
+        });
+
+        const starredBtn = poolCol.querySelector('#catalogueStarredToggle');
+        starredBtn.addEventListener('click', () => {
+          catalogueStarredOnly = !catalogueStarredOnly;
+          if (catalogueStarredOnly) {
+            starredBtn.className = 'w-full text-[11px] font-semibold rounded-md py-1 px-1.5 border flex items-center justify-center gap-1 transition-colors bg-amber-100 text-amber-900 border-amber-300 shadow-2xs';
+            starredBtn.querySelector('span:first-child').className = 'text-amber-600';
+            starredBtn.querySelector('#starredCountBadge').className = 'text-[10px] px-1 rounded-full font-mono bg-amber-200 text-amber-950 font-bold';
+          } else {
+            starredBtn.className = 'w-full text-[11px] font-semibold rounded-md py-1 px-1.5 border flex items-center justify-center gap-1 transition-colors bg-white text-slate-600 border-slate-200 hover:bg-slate-50';
+            starredBtn.querySelector('span:first-child').className = 'text-slate-400';
+            starredBtn.querySelector('#starredCountBadge').className = 'text-[10px] px-1 rounded-full font-mono bg-slate-100 text-slate-500';
+          }
+          renderCards();
+        });
+      }
+
+      // Semesters Grid Container (Clean responsive grid, wraps without horizontal overflow)
+      const semContainer = document.createElement('div');
+      semContainer.id = 'semestersGrid';
+      semContainer.className = 'flex-1 min-w-0 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3.5 w-full';
 
       // Semester Columns
       for (let i = 1; i <= state.semesterCount; i++) {
         const semId = `sem${i}`;
+        const semTerm = getSemesterTerm(i);
         const semCol = document.createElement('div');
-        semCol.className = 'w-72 shrink-0 flex flex-col bg-white border border-slate-200 rounded-xl p-3 shadow-sm min-h-[550px]';
+        semCol.className = 'flex flex-col bg-white border border-slate-200 rounded-xl p-3 shadow-2xs min-h-[550px] transition-colors w-full min-w-0';
         semCol.innerHTML = `
-          <div class="flex items-center justify-between mb-3 px-1">
-            <div>
-              <div class="flex items-center gap-1.5">
-                <h2 class="font-semibold text-sm text-slate-800">Semester ${i}</h2>
-                <button class="open-sem-cal-btn text-[11px] font-semibold text-indigo-600 hover:text-indigo-800 hover:underline flex items-center gap-0.5" data-sem="${i}">
-                  <span>📅 Timetable</span>
+          <div class="flex items-center justify-between gap-1.5 mb-2.5 px-0.5 pb-1 border-b border-slate-100">
+            <div class="min-w-0">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <h2 class="font-bold text-sm text-slate-900 tracking-tight">Semester ${i}</h2>
+                <span class="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded border ${semTerm === 'HS' ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}">${semTerm}</span>
+                <button class="open-sem-cal-btn text-xs text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-0.5 rounded transition-colors" data-sem="${i}" title="Open timetable for Semester ${i}">
+                  <span>📅</span>
                 </button>
               </div>
-              <span class="text-xs text-slate-400">${getTermName(i)}</span>
+              <span class="text-[11px] text-slate-400 font-medium block mt-0.5">${getTermName(i)}</span>
             </div>
-            <div class="flex items-center gap-1">
-              <span id="${semId}-clash-badge" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">⚠ Clash</span>
-              <span id="${semId}-count" class="text-xs font-semibold px-2 py-0.5 rounded-full">0 / 30 ECTS</span>
+            <div class="flex items-center gap-1 shrink-0">
+              <span id="${semId}-clash-badge" class="hidden text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">⚠️ Clash</span>
+              <span id="${semId}-count" class="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap">0 / 30 ECTS</span>
             </div>
           </div>
-          <div id="col-${semId}" class="kanban-col flex-1 space-y-2.5 overflow-y-auto max-h-[700px]" data-col="${semId}"></div>
+          <div id="col-${semId}" class="kanban-col flex-1 space-y-2.5 overflow-y-auto max-h-[calc(100vh-270px)] min-h-[480px] rounded-lg transition-colors" data-col="${semId}"></div>
         `;
-        board.appendChild(semCol);
+        semContainer.appendChild(semCol);
 
-        semCol.querySelector('.open-sem-cal-btn').addEventListener('click', (e) => {
+        semCol.querySelector('.open-sem-cal-btn').addEventListener('click', () => {
           openCalendarModal(i);
         });
       }
+      board.appendChild(semContainer);
 
       document.getElementById('removeSemesterBtn').classList.toggle('hidden', state.semesterCount <= 4);
       updateModalColumnSelect();
@@ -445,8 +742,13 @@
 
     function updateModalColumnSelect() {
       const select = document.getElementById('modCol');
+      const selectedTerm = document.getElementById('modTerm').value;
       select.innerHTML = '<option value="pool" selected>Course Catalogue</option>';
       for (let i = 1; i <= state.semesterCount; i++) {
+        const semTerm = getSemesterTerm(i);
+        if (selectedTerm === 'FS' && semTerm === 'HS') continue;
+        if (selectedTerm === 'HS' && semTerm === 'FS') continue;
+
         const opt = document.createElement('option');
         opt.value = `sem${i}`;
         opt.textContent = `Semester ${i} (${getTermName(i)})`;
@@ -454,18 +756,75 @@
       }
     }
 
+    document.getElementById('modTerm').addEventListener('change', () => {
+      updateModalColumnSelect();
+    });
+
     function attachDragListeners() {
+      const allModules = [...catalogue.modules, ...state.customModules];
+
       document.querySelectorAll('.kanban-col').forEach(colEl => {
         colEl.addEventListener('dragover', (e) => {
           e.preventDefault();
+          const targetCol = colEl.dataset.col;
+
+          if (currentlyDraggedModId && targetCol.startsWith('sem')) {
+            const draggedMod = allModules.find(m => m.id === currentlyDraggedModId);
+            const semNum = parseInt(targetCol.replace('sem', ''), 10);
+            const semTerm = getSemesterTerm(semNum);
+
+            // Block FS module from HS semester
+            if (draggedMod && draggedMod.term === 'FS' && semTerm === 'HS') {
+              e.dataTransfer.dropEffect = 'none';
+              colEl.classList.remove('drag-over');
+              colEl.classList.add('drag-invalid');
+              return;
+            }
+
+            // Block HS module from FS semester
+            if (draggedMod && draggedMod.term === 'HS' && semTerm === 'FS') {
+              e.dataTransfer.dropEffect = 'none';
+              colEl.classList.remove('drag-over');
+              colEl.classList.add('drag-invalid');
+              return;
+            }
+          }
+
+          colEl.classList.remove('drag-invalid');
           colEl.classList.add('drag-over');
         });
-        colEl.addEventListener('dragleave', () => colEl.classList.remove('drag-over'));
+
+        colEl.addEventListener('dragleave', (e) => {
+          if (colEl.contains(e.relatedTarget)) return;
+          colEl.classList.remove('drag-over', 'drag-invalid');
+        });
+
         colEl.addEventListener('drop', (e) => {
           e.preventDefault();
-          colEl.classList.remove('drag-over');
+          colEl.classList.remove('drag-over', 'drag-invalid');
           const modId = e.dataTransfer.getData('text/plain');
           const targetCol = colEl.dataset.col;
+          const mod = allModules.find(m => m.id === modId);
+
+          if (!mod) return;
+
+          // Enforce Term Placement Rules
+          if (targetCol.startsWith('sem')) {
+            const semNum = parseInt(targetCol.replace('sem', ''), 10);
+            const semTerm = getSemesterTerm(semNum);
+
+            // Strictly block FS module from HS semester
+            if (mod.term === 'FS' && semTerm === 'HS') {
+              showToast(`Cannot place: "${mod.name}" is only offered in Spring (FS) and cannot be added to an Autumn (HS) semester!`, 'error');
+              return;
+            }
+
+            // Also prevent HS module from FS semester
+            if (mod.term === 'HS' && semTerm === 'FS') {
+              showToast(`Cannot place: "${mod.name}" is only offered in Autumn (HS) and cannot be added to a Spring (FS) semester!`, 'error');
+              return;
+            }
+          }
 
           if (targetCol === 'pool') {
             delete state.placements[modId];
@@ -480,154 +839,188 @@
       });
     }
 
-    function getAvailableCategories(mod) {
-      if (mod.customCategory) {
-        return [{ category: mod.customCategory, label: categoryStyles[mod.customCategory]?.label || mod.customCategory }];
+    function getSelectedCategory(mod) {
+      if (state.categoryOverrides && state.categoryOverrides[mod.id]) {
+        return state.categoryOverrides[mod.id];
+      }
+      if (mod.customCategory) return mod.customCategory;
+
+      const userProg = mod.programs && mod.programs[state.selectedMajor];
+      if (userProg && userProg.categories && userProg.categories.length > 0) {
+        return userProg.categories[0].category;
       }
 
-      const majorInfo = MAJOR_RULES[state.selectedMajor] || { wahlpflichtLabel: "Wahlpflicht Major" };
-      const cats = [];
-
-      if (mod.programs && mod.programs[state.selectedMajor]) {
-        const pCats = mod.programs[state.selectedMajor].categories || [];
-        pCats.forEach(c => {
-          const catKey = c.category;
-          const label = catKey === 'wahlpflicht_major' ? majorInfo.wahlpflichtLabel : (categoryStyles[catKey]?.label || catKey);
-          if (!cats.some(item => item.category === catKey)) {
-            cats.push({ category: catKey, label: label });
-          }
-        });
+      const minorProg = mod.programs && mod.programs[state.selectedMinor];
+      if (minorProg && minorProg.categories && minorProg.categories.length > 0) {
+        return minorProg.categories[0].category;
       }
 
-      if (mod.programs && mod.programs[state.selectedMinor]) {
-        if (!cats.some(item => item.category === 'minor')) {
-          cats.push({ category: 'minor', label: 'Minor' });
+      if (mod.programs) {
+        for (const pid in mod.programs) {
+          const cats = mod.programs[pid].categories;
+          if (cats && cats.length > 0) return cats[0].category;
         }
       }
-
-      if (cats.length === 0) {
-        cats.push({ category: 'wahl_inf', label: 'Wahl INF' });
-      }
-
-      return cats;
+      return 'wahl_inf';
     }
 
-    function getSelectedCategory(mod) {
-      const avail = getAvailableCategories(mod);
-      const override = state.categoryOverrides && state.categoryOverrides[mod.id];
-      if (override && avail.some(a => a.category === override)) {
-        return override;
+    function getAvailableCategories(mod) {
+      const cats = new Map();
+      if (mod.customCategory) {
+        cats.set(mod.customCategory, categoryStyles[mod.customCategory] || { label: mod.customCategory });
+        return Array.from(cats.entries()).map(([k, v]) => ({ category: k, label: v.label }));
       }
-      const priority = ['pflicht', 'masterprojekt', 'masterarbeit', 'wahlpflicht_major', 'wahl_inf', 'wahl_wwf', 'minor'];
-      for (const p of priority) {
-        if (avail.some(a => a.category === p)) return p;
+
+      const checkProgram = (pid) => {
+        if (mod.programs && mod.programs[pid]) {
+          mod.programs[pid].categories.forEach(c => {
+            if (!cats.has(c.category)) {
+              cats.set(c.category, categoryStyles[c.category] || { label: c.category });
+            }
+          });
+        }
+      };
+
+      checkProgram(state.selectedMajor);
+      checkProgram(state.selectedMinor);
+
+      if (cats.size === 0 && mod.programs) {
+        Object.keys(mod.programs).forEach(checkProgram);
       }
-      return avail[0].category;
+
+      if (cats.size === 0) {
+        cats.set('wahl_inf', categoryStyles.wahl_inf);
+      }
+
+      return Array.from(cats.entries()).map(([k, v]) => ({ category: k, label: v.label }));
     }
 
-    function computeScheduleClashes() {
+    function detectTimetableClashes() {
       const allModules = [...catalogue.modules, ...state.customModules];
-      const clashesByModId = {};
+      const clashes = {};
+      let totalClashes = 0;
 
-      for (let i = 1; i <= state.semesterCount; i++) {
-        const semId = `sem${i}`;
-        const semMods = allModules.filter(m => state.placements[m.id] === semId && m.time_slots && m.time_slots.length > 0);
+      for (let sem = 1; sem <= state.semesterCount; sem++) {
+        const semId = `sem${sem}`;
+        const semMods = allModules.filter(m => state.placements[m.id] === semId);
+        let semHasClash = false;
 
-        for (let j = 0; j < semMods.length; j++) {
-          for (let k = j + 1; k < semMods.length; k++) {
-            const modA = semMods[j];
-            const modB = semMods[k];
+        const slotList = [];
+        semMods.forEach(m => {
+          if (m.time_slots && m.time_slots.length > 0) {
+            m.time_slots.forEach(s => {
+              slotList.push({
+                moduleId: m.id,
+                moduleName: m.name,
+                day: s.day,
+                start: s.start_min,
+                end: s.end_min,
+                timeText: s.text
+              });
+            });
+          }
+        });
 
-            for (const slotA of modA.time_slots) {
-              for (const slotB of modB.time_slots) {
-                if (slotA.day === slotB.day) {
-                  const overlap = Math.max(slotA.start_min, slotB.start_min) < Math.min(slotA.end_min, slotB.end_min);
-                  if (overlap) {
-                    if (!clashesByModId[modA.id]) clashesByModId[modA.id] = [];
-                    if (!clashesByModId[modB.id]) clashesByModId[modB.id] = [];
+        for (let i = 0; i < slotList.length; i++) {
+          for (let j = i + 1; j < slotList.length; j++) {
+            const a = slotList[i];
+            const b = slotList[j];
 
-                    clashesByModId[modA.id].push({
-                      withName: modB.name,
-                      day: slotA.day,
-                      timeThis: `${slotA.start}-${slotA.end}`,
-                      timeOther: `${slotB.start}-${slotB.end}`
-                    });
+            if (a.moduleId !== b.moduleId && a.day === b.day) {
+              if (Math.max(a.start, b.start) < Math.min(a.end, b.end)) {
+                semHasClash = true;
+                totalClashes++;
 
-                    clashesByModId[modB.id].push({
-                      withName: modA.name,
-                      day: slotB.day,
-                      timeThis: `${slotB.start}-${slotB.end}`,
-                      timeOther: `${slotA.start}-${slotA.end}`
-                    });
-                  }
-                }
+                if (!clashes[a.moduleId]) clashes[a.moduleId] = [];
+                clashes[a.moduleId].push({
+                  withName: b.moduleName,
+                  day: a.day,
+                  timeThis: a.timeText,
+                  timeOther: b.timeText
+                });
+
+                if (!clashes[b.moduleId]) clashes[b.moduleId] = [];
+                clashes[b.moduleId].push({
+                  withName: a.moduleName,
+                  day: a.day,
+                  timeThis: b.timeText,
+                  timeOther: a.timeText
+                });
               }
             }
           }
         }
-      }
 
-      return clashesByModId;
-    }
-
-    function renderCards() {
-      const allCols = ['pool'];
-      for (let i = 1; i <= state.semesterCount; i++) allCols.push(`sem${i}`);
-      allCols.forEach(col => {
-        const el = document.getElementById(`col-${col}`);
-        if (el) el.innerHTML = '';
-      });
-
-      const allAvailableModules = [...catalogue.modules, ...state.customModules];
-      const clashes = computeScheduleClashes();
-
-      let totalClashCount = 0;
-      for (let i = 1; i <= state.semesterCount; i++) {
-        const semId = `sem${i}`;
-        const hasClash = allAvailableModules.some(m => state.placements[m.id] === semId && clashes[m.id]);
-        const clashBadge = document.getElementById(`${semId}-clash-badge`);
-        if (clashBadge) {
-          clashBadge.classList.toggle('hidden', !hasClash);
-          if (hasClash) totalClashCount++;
+        const badge = document.getElementById(`${semId}-clash-badge`);
+        if (badge) {
+          badge.classList.toggle('hidden', !semHasClash);
         }
       }
 
-      document.getElementById('clashWarningBanner').classList.toggle('hidden', totalClashCount === 0);
+      return { clashes, totalClashCount: totalClashes };
+    }
+
+    function renderCards() {
+      document.querySelectorAll('.kanban-col').forEach(c => c.innerHTML = '');
+
+      const allAvailableModules = [...catalogue.modules, ...state.customModules];
+      const { clashes, totalClashCount } = detectTimetableClashes();
+
+      const globalBanner = document.getElementById('clashWarningBanner');
+      if (globalBanner) {
+        globalBanner.classList.toggle('hidden', totalClashCount === 0);
+      }
 
       let displayedCatalogueCount = 0;
       let displayedCatalogueEcts = 0;
 
+      const starredCountBadge = document.getElementById('starredCountBadge');
+      if (starredCountBadge) {
+        starredCountBadge.textContent = (state.starredModules || []).length;
+      }
+
       allAvailableModules.forEach(mod => {
         const placement = state.placements[mod.id] || 'pool';
 
-        const belongsToMajor = mod.programs && mod.programs[state.selectedMajor];
-        const belongsToMinor = mod.programs && mod.programs[state.selectedMinor];
-        if (placement === 'pool' && !belongsToMajor && !belongsToMinor && !mod.isCustom) {
-          return;
+        const availCats = getAvailableCategories(mod);
+        let activeCatKey = getSelectedCategory(mod);
+        if (!availCats.some(c => c.category === activeCatKey)) {
+          activeCatKey = availCats[0].category;
         }
 
-        const availCats = getAvailableCategories(mod);
-        const activeCatKey = getSelectedCategory(mod);
         const style = categoryStyles[activeCatKey] || categoryStyles.wahl_inf;
         const term = mod.term || 'both';
+        const isStarred = (state.starredModules || []).includes(mod.id);
 
+        // Apply Search & Filters to Catalogue column (pool)
         if (placement === 'pool') {
+          if (catalogueStarredOnly && !isStarred) {
+            return;
+          }
+
           if (catalogueSearchQuery) {
             const matchesName = mod.name.toLowerCase().includes(catalogueSearchQuery);
             const matchesId = (mod.sm_id || '').toLowerCase().includes(catalogueSearchQuery);
             const matchesSchedule = (mod.schedule_text || '').toLowerCase().includes(catalogueSearchQuery);
-            if (!matchesName && !matchesId && !matchesSchedule) return;
+            const matchesCampus = (mod.campus || '').toLowerCase().includes(catalogueSearchQuery);
+            const matchesRooms = (mod.rooms || []).some(r => r.toLowerCase().includes(catalogueSearchQuery));
+            if (!matchesName && !matchesId && !matchesSchedule && !matchesCampus && !matchesRooms) return;
           }
 
           if (catalogueTermFilter !== 'all') {
+            if (catalogueTermFilter === 'both' && term !== 'both') return;
             if (catalogueTermFilter === 'HS' && term !== 'HS' && term !== 'both') return;
             if (catalogueTermFilter === 'FS' && term !== 'FS' && term !== 'both') return;
-            if (catalogueTermFilter === 'both' && term !== 'both') return;
           }
 
           if (catalogueCatFilter !== 'all') {
             const matchesCategory = availCats.some(c => c.category === catalogueCatFilter);
             if (!matchesCategory) return;
+          }
+
+          if (catalogueCampusFilter !== 'all') {
+            const modCampuses = mod.campuses || (mod.campus ? [mod.campus] : []);
+            if (!modCampuses.includes(catalogueCampusFilter)) return;
           }
 
           displayedCatalogueCount++;
@@ -638,10 +1031,55 @@
         card.draggable = true;
         card.dataset.id = mod.id;
 
+        // Term Badge
         let termBadge = `<span class="border px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-50 text-slate-600 border-slate-200">HS/FS</span>`;
         if (term === 'HS') termBadge = `<span class="border px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-50 text-amber-700 border-amber-200">HS</span>`;
         if (term === 'FS') termBadge = `<span class="border px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-50 text-emerald-700 border-emerald-200">FS</span>`;
 
+        // Campus Badges
+        let campusBadges = '';
+        if (mod.campuses && mod.campuses.length > 0) {
+          campusBadges = mod.campuses.map(camp => {
+            const cStyle = campusStyles[camp] || { label: camp, bg: 'bg-slate-50 text-slate-600 border-slate-200' };
+            const roomTip = mod.rooms && mod.rooms.length > 0 ? `Rooms: ${mod.rooms.join(', ')}` : camp;
+            return `<span class="border px-1.5 py-0.5 rounded text-[10px] font-medium ${cStyle.bg}" title="${roomTip}">📍 ${camp}</span>`;
+          }).join(' ');
+        } else if (mod.campus) {
+          const cStyle = campusStyles[mod.campus] || { label: mod.campus, bg: 'bg-slate-50 text-slate-600 border-slate-200' };
+          campusBadges = `<span class="border px-1.5 py-0.5 rounded text-[10px] font-medium ${cStyle.bg}">📍 ${mod.campus}</span>`;
+        }
+
+        // Room snippet
+        let roomSnippet = '';
+        if (mod.rooms && mod.rooms.length > 0) {
+          const mainRooms = mod.rooms.slice(0, 2).join(', ');
+          const extra = mod.rooms.length > 2 ? ` (+${mod.rooms.length - 2})` : '';
+          roomSnippet = `<span class="text-[10px] text-slate-500 font-mono" title="${mod.rooms.join(', ')}">${mainRooms}${extra}</span>`;
+        }
+
+        // Lecture Time Slots Badge
+        let timeSlotsHtml = '';
+        if (mod.time_slots && mod.time_slots.length > 0) {
+          timeSlotsHtml = `
+            <div class="mt-2 flex flex-wrap gap-1">
+              ${mod.time_slots.map(s => `
+                <span class="inline-flex items-center gap-1 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200" title="${s.text}">
+                  <span>🕒</span>
+                  <span>${s.text}</span>
+                </span>
+              `).join('')}
+            </div>
+          `;
+        } else if (mod.schedule_text) {
+          timeSlotsHtml = `
+            <div class="mt-2 text-[10px] text-slate-500 flex items-center gap-1 font-mono truncate" title="${mod.schedule_text}">
+              <span>📅</span>
+              <span class="truncate">${mod.schedule_text}</span>
+            </div>
+          `;
+        }
+
+        // Term Mismatch Warning
         let termMismatchWarning = '';
         let borderClass = 'border-slate-200 hover:border-slate-300';
 
@@ -650,26 +1088,28 @@
           const currentSemTerm = getSemesterTerm(semNum);
           if (term !== 'both' && term !== currentSemTerm) {
             borderClass = 'border-red-300 bg-red-50/20';
-            termMismatchWarning = `<div class="mt-2 text-[10px] font-semibold text-red-600">⚠ Only offered in ${term}</div>`;
+            termMismatchWarning = `<div class="mt-2 text-[10px] font-semibold text-red-600 flex items-center gap-1"><span>⚠️</span><span>Only offered in ${term}</span></div>`;
           }
         }
 
+        // Clash Warning
         let clashWarning = '';
         if (clashes[mod.id]) {
           borderClass = 'border-amber-400 bg-amber-50/20 shadow';
           const details = clashes[mod.id].map(c => `Clashes with <strong class="text-amber-950">${c.withName}</strong> (${c.day} ${c.timeThis})`).join('<br/>');
           clashWarning = `
             <div class="mt-2 p-1.5 rounded bg-amber-100/80 border border-amber-300 text-[10px] text-amber-900 leading-tight">
-              <span class="font-bold flex items-center gap-1 text-amber-950">⚠ Time Conflict</span>
+              <span class="font-bold flex items-center gap-1 text-amber-950">⚠️ Time Conflict</span>
               <div class="mt-0.5">${details}</div>
             </div>
           `;
         }
 
+        // Category dropdown or pill
         let categoryElement = '';
         if (availCats.length > 1) {
           categoryElement = `
-            <select class="cat-select text-[11px] font-medium border rounded px-1 py-0.5 bg-white cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 ${style.bg}">
+            <select class="cat-select text-[11px] font-medium border rounded px-1 py-0.5 bg-white cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500 max-w-full truncate ${style.bg}">
               ${availCats.map(c => `<option value="${c.category}" ${c.category === activeCatKey ? 'selected' : ''}>${c.label}</option>`).join('')}
             </select>
           `;
@@ -677,39 +1117,70 @@
           categoryElement = `<span class="border px-1.5 py-0.5 rounded font-medium text-[11px] ${style.bg}">${availCats[0].label}</span>`;
         }
 
-        const schedulePill = mod.schedule_text ? `
-          <div class="mt-1.5 text-[10px] text-slate-500 flex items-center gap-1 font-mono truncate" title="${mod.schedule_text}">
-            <span>📅</span>
-            <span class="truncate">${mod.schedule_text}</span>
-          </div>
-        ` : '';
-
-        card.className = `group relative bg-white border ${borderClass} rounded-lg p-3 shadow-sm hover:shadow cursor-grab active:cursor-grabbing transition-all`;
+        card.className = `group relative bg-white border ${borderClass} rounded-lg p-2.5 shadow-2xs hover:shadow-sm cursor-grab active:cursor-grabbing transition-all min-w-0 w-full`;
         card.innerHTML = `
-          <div class="flex items-start justify-between gap-2 mb-1.5">
-            <a href="${mod.url}" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-slate-800 hover:text-blue-600 flex items-center gap-1 group/link">
-              <span>${mod.name}</span>
-              <svg class="w-3 h-3 text-slate-400 group-hover/link:text-blue-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+          <div class="flex items-start justify-between gap-2 mb-2 min-w-0">
+            <a href="${mod.url}" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-slate-800 hover:text-blue-600 flex items-start gap-1 group/link flex-1 min-w-0 leading-snug">
+              <span class="break-words">${mod.name}</span>
+              <svg class="w-3 h-3 text-slate-400 group-hover/link:text-blue-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
             </a>
-            <button class="delete-btn text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs">✕</button>
+            <div class="flex items-center gap-0.5 shrink-0 -mr-1">
+              <button class="star-btn p-1 rounded hover:bg-slate-100 text-sm transition-transform active:scale-125 focus:outline-none leading-none" title="${isStarred ? 'Unstar module' : 'Star module'}">
+                ${isStarred ? '<span class="text-amber-500 font-bold">★</span>' : '<span class="text-slate-300 hover:text-amber-400 font-bold">☆</span>'}
+              </button>
+              <button class="delete-btn text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs p-1 leading-none">✕</button>
+            </div>
           </div>
-          <div class="flex items-center justify-between gap-1 flex-wrap">
-            <div class="flex items-center gap-1.5">
+
+          <div class="flex items-center justify-between gap-1.5 flex-wrap">
+            <div class="flex items-center gap-1.5 flex-wrap">
               ${categoryElement}
               ${termBadge}
             </div>
-            <span class="font-bold text-slate-600 text-[11px]">${mod.ects} ECTS</span>
+            <span class="font-bold text-slate-700 text-[11px] shrink-0">${mod.ects} ECTS</span>
           </div>
-          ${schedulePill}
+
+          <!-- Campus and Rooms -->
+          ${(campusBadges || roomSnippet) ? `
+            <div class="mt-1.5 pt-1.5 border-t border-slate-100 flex items-center gap-1.5 flex-wrap">
+              ${campusBadges}
+              ${roomSnippet}
+            </div>
+          ` : ''}
+
+          <!-- Time Slots -->
+          ${timeSlotsHtml}
+
+          <!-- Warnings -->
           ${termMismatchWarning}
           ${clashWarning}
         `;
 
+        // Star button toggle
+        const starBtn = card.querySelector('.star-btn');
+        starBtn.addEventListener('mousedown', (e) => e.stopPropagation());
+        starBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!state.starredModules) state.starredModules = [];
+          const idx = state.starredModules.indexOf(mod.id);
+          if (idx > -1) {
+            state.starredModules.splice(idx, 1);
+            showToast(`Removed "${mod.name}" from favorites.`, 'info');
+          } else {
+            state.starredModules.push(mod.id);
+            showToast(`Starred "${mod.name}"!`, 'info');
+          }
+          persistState();
+          renderCards();
+        });
+
+        // Category selection
         const catSelect = card.querySelector('.cat-select');
         if (catSelect) {
           catSelect.addEventListener('mousedown', (e) => e.stopPropagation());
-          catSelect.addEventListener('click', (e) => e.stopPropagation());
           catSelect.addEventListener('change', (e) => {
+            e.stopPropagation();
+            if (!state.categoryOverrides) state.categoryOverrides = {};
             state.categoryOverrides[mod.id] = e.target.value;
             persistState();
             renderCards();
@@ -717,20 +1188,30 @@
           });
         }
 
+        // External Link click
         const link = card.querySelector('a');
         link.addEventListener('click', (e) => e.stopPropagation());
         link.addEventListener('mousedown', (e) => e.stopPropagation());
 
+        // Drag handlers
         card.addEventListener('dragstart', (e) => {
+          currentlyDraggedModId = mod.id;
           e.dataTransfer.setData('text/plain', mod.id);
           card.classList.add('card-dragging');
         });
-        card.addEventListener('dragend', () => card.classList.remove('card-dragging'));
 
+        card.addEventListener('dragend', () => {
+          currentlyDraggedModId = null;
+          card.classList.remove('card-dragging');
+          document.querySelectorAll('.kanban-col').forEach(c => {
+            c.classList.remove('drag-over', 'drag-invalid');
+          });
+        });
+
+        // Delete button
         card.querySelector('.delete-btn').addEventListener('click', (e) => {
           e.stopPropagation();
           delete state.placements[mod.id];
-          delete state.categoryOverrides[mod.id];
           if (mod.isCustom) {
             state.customModules = state.customModules.filter(m => m.id !== mod.id);
           }
@@ -746,6 +1227,15 @@
       const poolCountEl = document.getElementById('pool-count');
       if (poolCountEl) {
         poolCountEl.textContent = `${displayedCatalogueCount} (${displayedCatalogueEcts} ECTS)`;
+        poolCountEl.title = `${displayedCatalogueCount} modules available (${displayedCatalogueEcts} ECTS)`;
+      }
+      const poolCountCollapsedEl = document.getElementById('pool-count-collapsed');
+      if (poolCountCollapsedEl) {
+        poolCountCollapsedEl.textContent = `${displayedCatalogueCount}`;
+      }
+      const poolCountCollapsedMob = document.getElementById('pool-count-collapsed-mobile');
+      if (poolCountCollapsedMob) {
+        poolCountCollapsedMob.textContent = `${displayedCatalogueCount}`;
       }
     }
 
@@ -779,7 +1269,7 @@
         document.getElementById(statId).textContent = `${current} / ${target} ECTS`;
         const badge = document.getElementById(badgeId);
         const met = current === target;
-        badge.className = `text-xs font-bold px-2.5 py-1 rounded-full ${met ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`;
+        badge.className = `text-xs font-bold px-2.5 py-1 rounded-full ${met ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`
         badge.textContent = met ? '✓ Satisfied' : 'Pending';
       };
 
@@ -797,7 +1287,7 @@
       ];
 
       document.getElementById('a72Container').innerHTML = a72Sections.map(s => `
-        <div class="bg-white border ${s.valid ? 'border-emerald-300' : 'border-slate-200'} rounded-xl p-3 shadow-sm flex flex-col justify-between">
+        <div class="bg-white border ${s.valid ? 'border-emerald-300' : 'border-slate-200'} rounded-xl p-2.5 sm:p-3 shadow-2xs flex flex-col justify-between min-w-0">
           <div>
             <div class="flex items-center justify-between mb-1">
               <span class="text-xs font-bold text-slate-800 truncate" title="${s.title}">${s.title}</span>
@@ -806,174 +1296,168 @@
             <p class="text-[10px] text-slate-400 truncate mb-2" title="${s.subtitle}">${s.subtitle}</p>
           </div>
           <div>
-            <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden mb-1">
-              <div class="h-1.5 rounded-full ${s.valid ? 'bg-emerald-500' : 'bg-blue-600'}" style="width: ${Math.min(100, (s.current / s.target) * 100)}%"></div>
+            <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+              <div class="h-full ${s.valid ? 'bg-emerald-500' : 'bg-blue-500'} rounded-full transition-all" style="width: ${Math.min(100, (s.current / s.target) * 100)}%"></div>
             </div>
-            ${s.warning ? `<p class="text-[9px] text-amber-600 truncate font-semibold">${s.warning}</p>` : ''}
+            ${s.warning ? `<p class="text-[9px] text-amber-600 mt-1 font-semibold truncate" title="${s.warning}">${s.warning}</p>` : ''}
           </div>
         </div>
       `).join('');
 
       for (let i = 1; i <= state.semesterCount; i++) {
         const semId = `sem${i}`;
-        const colEcts = allModules.filter(m => state.placements[m.id] === semId).reduce((sum, m) => sum + m.ects, 0);
+        const semMods = allModules.filter(m => state.placements[m.id] === semId);
+        const semEcts = semMods.reduce((acc, m) => acc + m.ects, 0);
         const el = document.getElementById(`${semId}-count`);
         if (el) {
-          el.textContent = `${colEcts} / 30 ECTS`;
-          el.className = `text-xs font-semibold px-2.5 py-0.5 rounded-full ${colEcts === 30 ? 'bg-emerald-100 text-emerald-800' : (colEcts > 30 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600')}`;
+          el.textContent = `${semEcts} / 30 ECTS`;
+          el.className = `text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${semEcts === 30 ? 'bg-emerald-100 text-emerald-800' : (semEcts > 30 ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600')}`;
         }
       }
     }
 
-    // ==========================================
-    // CALENDAR VIEW & ICS EXPORTER
-    // ==========================================
+    // Calendar Modal
+    const calendarModal = document.getElementById('calendarModal');
 
-    function openCalendarModal(semNum) {
+    function openCalendarModal(semNum = 1) {
       activeCalendarSem = semNum;
-      renderCalendarModal();
-      const modal = document.getElementById('calendarModal');
-      modal.classList.remove('hidden');
-      modal.classList.add('flex');
+      renderCalendarView(semNum);
+      calendarModal.classList.remove('hidden');
+      calendarModal.classList.add('flex');
     }
 
     function closeCalendarModal() {
-      const modal = document.getElementById('calendarModal');
-      modal.classList.add('hidden');
-      modal.classList.remove('flex');
+      calendarModal.classList.add('hidden');
+      calendarModal.classList.remove('flex');
     }
 
-    function renderCalendarModal() {
-      const semNum = activeCalendarSem;
+    function renderCalendarView(semNum) {
+      const semId = `sem${semNum}`;
       const semTerm = getSemesterTerm(semNum);
       const semLabel = getTermName(semNum);
 
       document.getElementById('calendarTitle').textContent = `Semester ${semNum} Timetable`;
       document.getElementById('calendarTermBadge').textContent = semTerm;
       document.getElementById('calendarTermBadge').className = `text-xs font-semibold px-2 py-0.5 rounded ${semTerm === 'HS' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`;
-      document.getElementById('calendarSubtext').textContent = `${semLabel} • Weekly lecture distribution, rooms & time slots`;
+      document.getElementById('calendarSubtext').textContent = `${semLabel} • Weekly lecture distribution, campus locations & room allocations`;
 
       // Render Semester Tabs
       const tabsContainer = document.getElementById('calendarSemesterTabs');
       tabsContainer.innerHTML = '';
       for (let i = 1; i <= state.semesterCount; i++) {
-        const btn = document.createElement('button');
-        btn.textContent = `Sem ${i}`;
-        btn.className = `px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${i === semNum ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`;
-        btn.onclick = () => {
+        const tabBtn = document.createElement('button');
+        const isActive = i === semNum;
+        tabBtn.className = `px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${isActive ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'}`;
+        tabBtn.textContent = `Sem ${i} (${getSemesterTerm(i)})`;
+        tabBtn.addEventListener('click', () => {
           activeCalendarSem = i;
-          renderCalendarModal();
-        };
-        tabsContainer.appendChild(btn);
+          renderCalendarView(i);
+        });
+        tabsContainer.appendChild(tabBtn);
       }
 
       // Clear Day Columns
-      const dayCols = document.querySelectorAll('.day-col');
-      dayCols.forEach(col => col.innerHTML = '');
+      const dayCols = {
+        'Mon': calendarModal.querySelector('.day-col[data-day="Mon"]'),
+        'Tue': calendarModal.querySelector('.day-col[data-day="Tue"]'),
+        'Wed': calendarModal.querySelector('.day-col[data-day="Wed"]'),
+        'Thu': calendarModal.querySelector('.day-col[data-day="Thu"]'),
+        'Fri': calendarModal.querySelector('.day-col[data-day="Fri"]')
+      };
 
-      // Get Active Semester Modules
+      Object.values(dayCols).forEach(col => col.innerHTML = '');
+
       const allModules = [...catalogue.modules, ...state.customModules];
-      const semModules = allModules.filter(m => state.placements[m.id] === `sem${semNum}`);
+      const semMods = allModules.filter(m => state.placements[m.id] === semId);
 
-      const unscheduledModules = [];
-      const clashes = computeScheduleClashes();
+      const unscheduledMods = [];
+      const START_MIN = 8 * 60;   // 08:00
+      const END_MIN = 20 * 60;    // 20:00
+      const TOTAL_MIN = END_MIN - START_MIN; // 720 minutes
 
-      // Render Scheduled Time Blocks (08:00 = 480 min to 20:00 = 1200 min, span = 720 min)
-      semModules.forEach(mod => {
+      semMods.forEach(mod => {
         const catKey = getSelectedCategory(mod);
         const style = categoryStyles[catKey] || categoryStyles.wahl_inf;
-        const slots = mod.time_slots || [];
 
-        if (slots.length === 0) {
-          unscheduledModules.push(mod);
+        if (!mod.time_slots || mod.time_slots.length === 0) {
+          unscheduledMods.push(mod);
           return;
         }
 
-        slots.forEach(slot => {
-          const dayCol = document.querySelector(`.day-col[data-day="${slot.day}"]`);
-          if (!dayCol) return;
+        mod.time_slots.forEach(slot => {
+          const col = dayCols[slot.day];
+          if (!col) return;
 
-          // Normalize: Clamped between 08:00 and 20:00
-          const startMin = Math.max(480, slot.start_min);
-          const endMin = Math.min(1200, slot.end_min);
-          if (endMin <= startMin) return;
-
-          const topPercent = ((startMin - 480) / 720) * 100;
-          const heightPercent = ((endMin - startMin) / 720) * 100;
-
-          const isClashing = clashes[mod.id] && clashes[mod.id].some(c => c.day === slot.day);
+          const topPercent = Math.max(0, ((slot.start_min - START_MIN) / TOTAL_MIN) * 100);
+          const durationMin = slot.end_min - slot.start_min;
+          const heightPercent = (durationMin / TOTAL_MIN) * 100;
 
           const block = document.createElement('div');
-          block.className = `absolute left-1 right-1 rounded-lg p-2 border shadow-xs overflow-hidden flex flex-col justify-between transition-transform hover:scale-[1.01] hover:z-20 ${style.bg} ${isClashing ? 'ring-2 ring-amber-500 border-amber-500' : ''}`;
+          block.className = `absolute left-1 right-1 rounded-lg border p-1.5 shadow-xs overflow-hidden flex flex-col justify-between transition-all hover:z-20 hover:shadow-md cursor-pointer ${style.bg}`;
           block.style.top = `${topPercent}%`;
           block.style.height = `${Math.max(5, heightPercent)}%`;
 
-          const roomLabel = slot.room ? `📍 ${slot.room}` : '📍 TBA';
+          const campusName = mod.campus || (mod.campuses && mod.campuses.length > 0 ? mod.campuses[0] : '');
+          const roomLabel = slot.room ? `📍 ${slot.room}${campusName ? ` (${campusName})` : ''}` : (campusName ? `📍 ${campusName}` : '📍 TBA');
 
           block.innerHTML = `
             <div>
-              <div class="flex items-center justify-between gap-1 leading-tight">
+              <div class="flex items-start justify-between gap-1 leading-tight">
                 <span class="font-bold text-[11px] truncate" title="${mod.name}">${mod.name}</span>
                 <span class="text-[10px] font-mono font-semibold shrink-0">${slot.start}</span>
               </div>
-              <div class="text-[10px] font-medium text-slate-600 truncate mt-0.5">${roomLabel}</div>
+              <div class="text-[10px] font-medium text-slate-600 truncate mt-0.5" title="${roomLabel}">${roomLabel}</div>
             </div>
             <div class="flex items-center justify-between text-[9px] font-semibold mt-1">
               <span class="truncate">${style.label}</span>
-              <span>${mod.ects} ECTS</span>
+              <span class="font-mono">${mod.ects} ECTS</span>
             </div>
           `;
-
-          dayCol.appendChild(block);
+          col.appendChild(block);
         });
       });
 
-      // Render Unscheduled Shelf
-      const unscheduledContainer = document.getElementById('unscheduledContainer');
-      const unscheduledSection = document.getElementById('unscheduledSection');
-      unscheduledContainer.innerHTML = '';
-
-      if (unscheduledModules.length === 0) {
-        unscheduledSection.classList.add('hidden');
+      // Render Unscheduled Section
+      const unschedContainer = document.getElementById('unscheduledContainer');
+      unschedContainer.innerHTML = '';
+      if (unscheduledMods.length === 0) {
+        unschedContainer.innerHTML = '<span class="text-slate-400 italic">All modules in this semester have scheduled weekly times.</span>';
       } else {
-        unscheduledSection.classList.remove('hidden');
-        unscheduledModules.forEach(mod => {
+        unscheduledMods.forEach(mod => {
           const catKey = getSelectedCategory(mod);
           const style = categoryStyles[catKey] || categoryStyles.wahl_inf;
           const pill = document.createElement('div');
-          pill.className = `px-2.5 py-1.5 rounded-lg border flex items-center gap-2 bg-white ${style.bg}`;
+          pill.className = `px-2.5 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-2 ${style.bg}`;
           pill.innerHTML = `
-            <span class="font-semibold text-slate-800">${mod.name}</span>
-            <span class="text-slate-500 text-[11px]">(${mod.ects} ECTS)</span>
-            <span class="text-[10px] font-bold px-1 py-0.2 rounded border bg-white/70">${style.label}</span>
+            <span class="font-semibold">${mod.name}</span>
+            <span class="font-mono text-[11px] font-bold">(${mod.ects} ECTS)</span>
+            <span class="text-[10px] text-slate-500 italic">${mod.schedule_text || 'Individual / By arrangement'}</span>
           `;
-          unscheduledContainer.appendChild(pill);
+          unschedContainer.appendChild(pill);
         });
       }
     }
 
-    // Generate and Download RFC 5545 .ics Calendar File
+    // Export .ics format for active semester
     function exportSemesterIcs(semNum) {
-      const allModules = [...catalogue.modules, ...state.customModules];
-      const semModules = allModules.filter(m => state.placements[m.id] === `sem${semNum}`);
+      const semId = `sem${semNum}`;
       const semTerm = getSemesterTerm(semNum);
+      const allModules = [...catalogue.modules, ...state.customModules];
+      const semMods = allModules.filter(m => state.placements[m.id] === semId);
 
-      // Representative UZH Semester Start Mondays:
-      // HS (Autumn): September 14, 2026
-      // FS (Spring): February 15, 2027
       const baseYear = semTerm === 'HS' ? 2026 : 2027;
-      const baseMonth = semTerm === 'HS' ? 9 : 2; // Sept or Feb
-      const baseDay = semTerm === 'HS' ? 14 : 15; // Monday start
+      const baseMonth = semTerm === 'HS' ? 9 : 2;
+      const baseDay = semTerm === 'HS' ? 14 : 15;
 
       const dayOffsets = { 'Mon': 0, 'Tue': 1, 'Wed': 2, 'Thu': 3, 'Fri': 4, 'Sat': 5, 'Sun': 6 };
 
-      const formatIcsDate = (d, hour, min) => {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        const h = String(hour).padStart(2, '0');
-        const m = String(min).padStart(2, '0');
-        return `${year}${month}${day}T${h}${m}00`;
+      const formatIcsDate = (dateObj, hour, minute) => {
+        const y = dateObj.getFullYear();
+        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const d = String(dateObj.getDate()).padStart(2, '0');
+        const hh = String(hour).padStart(2, '0');
+        const mm = String(minute).padStart(2, '0');
+        return `${y}${m}${d}T${hh}${mm}00`;
       };
 
       const nowIso = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
@@ -989,13 +1473,12 @@
 
       let eventCount = 0;
 
-      semModules.forEach(mod => {
-        const slots = mod.time_slots || [];
-        const catKey = getSelectedCategory(mod);
-        const style = categoryStyles[catKey] || categoryStyles.wahl_inf;
+      semMods.forEach(mod => {
+        if (!mod.time_slots || mod.time_slots.length === 0) return;
+        const style = categoryStyles[getSelectedCategory(mod)] || { label: 'Course' };
 
-        slots.forEach((slot, sIdx) => {
-          const offset = dayOffsets[slot.day] || 0;
+        mod.time_slots.forEach((slot, slotIdx) => {
+          const offset = dayOffsets[slot.day] !== undefined ? dayOffsets[slot.day] : 0;
           const firstDate = new Date(baseYear, baseMonth - 1, baseDay + offset);
 
           const [sh, sm] = slot.start.split(':').map(Number);
@@ -1004,15 +1487,21 @@
           const dtStart = formatIcsDate(firstDate, sh, sm);
           const dtEnd = formatIcsDate(firstDate, eh, em);
 
-          const location = slot.room ? `UZH Room ${slot.room}` : "University of Zurich";
+          const campusName = mod.campus || (mod.campuses && mod.campuses.length > 0 ? mod.campuses.join(', ') : '');
+          const locParts = [];
+          if (slot.room) locParts.push(`Room ${slot.room}`);
+          if (campusName) locParts.push(`Campus ${campusName}`);
+          locParts.push("University of Zurich");
+          const location = locParts.join(', ');
+
           const description = `Module: ${mod.name}\\nECTS: ${mod.ects}\\nCategory: ${style.label}\\nVVZ Link: ${mod.url || ''}`;
 
           icsContent.push("BEGIN:VEVENT");
-          icsContent.push(`UID:UZH_${mod.id}_sem${semNum}_slot${sIdx}_${Date.now()}@planner.uzh`);
+          icsContent.push(`UID:UZH-${mod.id}-${semNum}-${slotIdx}@uzhplanner.local`);
           icsContent.push(`DTSTAMP:${nowIso}`);
           icsContent.push(`DTSTART:${dtStart}`);
           icsContent.push(`DTEND:${dtEnd}`);
-          icsContent.push("RRULE:FREQ=WEEKLY;COUNT=14"); // Standard 14 lecture weeks per semester
+          icsContent.push("RRULE:FREQ=WEEKLY;COUNT=14");
           icsContent.push(`SUMMARY:${mod.name}`);
           icsContent.push(`LOCATION:${location}`);
           icsContent.push(`DESCRIPTION:${description}`);
@@ -1025,28 +1514,31 @@
       icsContent.push("END:VCALENDAR");
 
       if (eventCount === 0) {
-        alert(`No fixed lecture hours found for Semester ${semNum}. Modules in this semester may be thesis, projects, or self-scheduled.`);
+        showToast(`No fixed lecture hours found for Semester ${semNum}. Modules in this semester may be thesis, projects, or self-scheduled.`, 'warning');
         return;
       }
 
       const blob = new Blob([icsContent.join("\r\n")], { type: "text/calendar;charset=utf-8" });
       const link = document.createElement("a");
       link.href = URL.createObjectURL(blob);
-      link.download = `UZH_Semester_${semNum}_${semTerm}_Schedule.ics`;
+      link.download = `UZH_Semester_${semNum}_${semTerm}_Timetable.ics`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(link.href);
+      showToast(`Exported ${eventCount} events for Semester ${semNum} to .ics!`, 'info');
     }
 
     // Modal Event Listeners
     document.getElementById('openGlobalCalendarBtn').addEventListener('click', () => openCalendarModal(1));
+    document.getElementById('bannerOpenTimetableBtn').addEventListener('click', () => openCalendarModal(1));
     document.getElementById('closeCalendarBtn').addEventListener('click', closeCalendarModal);
     document.getElementById('exportIcsBtn').addEventListener('click', () => exportSemesterIcs(activeCalendarSem));
 
     majorSelect.addEventListener('change', (e) => {
       state.selectedMajor = e.target.value;
       persistState();
+      buildBoardDOM();
       renderCards();
       renderAudit();
     });
@@ -1054,6 +1546,7 @@
     minorSelect.addEventListener('change', (e) => {
       state.selectedMinor = e.target.value;
       persistState();
+      buildBoardDOM();
       renderCards();
       renderAudit();
     });
@@ -1068,10 +1561,14 @@
 
     document.getElementById('removeSemesterBtn').addEventListener('click', () => {
       if (state.semesterCount <= 4) return;
-      const lastSemId = `sem${state.semesterCount}`;
-      Object.keys(state.placements).forEach(k => {
-        if (state.placements[k] === lastSemId) {
-          delete state.placements[k];
+      const removeSemKey = `sem${state.semesterCount}`;
+      Object.keys(state.placements).forEach(modId => {
+        if (state.placements[modId] === removeSemKey) {
+          delete state.placements[modId];
+        }
+      });
+      Object.keys(state.categoryOverrides).forEach(k => {
+        if (k.startsWith(removeSemKey)) {
           delete state.categoryOverrides[k];
         }
       });
@@ -1098,12 +1595,33 @@
     document.getElementById('moduleForm').addEventListener('submit', (e) => {
       e.preventDefault();
       const schedText = document.getElementById('modSchedule').value.trim();
+      const modTerm = document.getElementById('modTerm').value;
+      const initialCol = document.getElementById('modCol').value;
+      const campusVal = document.getElementById('modCampus').value;
+
+      // Validate semester compatibility
+      if (initialCol.startsWith('sem')) {
+        const semNum = parseInt(initialCol.replace('sem', ''), 10);
+        const semTerm = getSemesterTerm(semNum);
+        if (modTerm === 'FS' && semTerm === 'HS') {
+          showToast('Cannot place: Spring (FS) modules cannot be added directly to an Autumn (HS) semester!', 'error');
+          return;
+        }
+        if (modTerm === 'HS' && semTerm === 'FS') {
+          showToast('Cannot place: Autumn (HS) modules cannot be added directly to a Spring (FS) semester!', 'error');
+          return;
+        }
+      }
+
       const newMod = {
         id: 'CUSTOM_' + Date.now(),
         sm_id: 'custom',
         name: document.getElementById('modName').value.trim(),
         ects: parseInt(document.getElementById('modEcts').value, 10),
-        term: document.getElementById('modTerm').value,
+        term: modTerm,
+        campus: campusVal,
+        campuses: campusVal ? [campusVal] : [],
+        rooms: [],
         customCategory: document.getElementById('modCategory').value,
         schedule_text: schedText,
         time_slots: [],
@@ -1112,18 +1630,162 @@
         programs: {}
       };
 
-      const initialCol = document.getElementById('modCol').value;
       if (initialCol !== 'pool') state.placements[newMod.id] = initialCol;
       state.customModules.push(newMod);
 
       persistState();
+      buildBoardDOM();
       renderCards();
       renderAudit();
       modal.classList.add('hidden');
       modal.classList.remove('flex');
+      showToast(`Added custom module "${newMod.name}"`, 'info');
     });
 
     document.getElementById('reloadBtn').addEventListener('click', () => initApp());
+
+    // -------------------------------------------------------------
+    // Live Catalogue Refresh & Progress Bar
+    // -------------------------------------------------------------
+    const refreshBtn = document.getElementById('refreshDataBtn');
+    const emptyLoadDataBtn = document.getElementById('emptyLoadDataBtn');
+    const refreshModal = document.getElementById('refreshModal');
+    const refreshProgressBar = document.getElementById('refreshProgressBar');
+    const refreshPercentLabel = document.getElementById('refreshPercentLabel');
+    const refreshStageLabel = document.getElementById('refreshStageLabel');
+    const refreshModalTitle = document.getElementById('refreshModalTitle');
+    const refreshModalSubtitle = document.getElementById('refreshModalSubtitle');
+    const refreshLogConsole = document.getElementById('refreshLogConsole');
+    const refreshSpinner = document.getElementById('refreshSpinner');
+    const closeRefreshModalBtn = document.getElementById('closeRefreshModalBtn');
+    const cancelRefreshBtn = document.getElementById('cancelRefreshBtn');
+
+    let refreshEventSource = null;
+
+    function openRefreshModal() {
+      refreshModal.classList.remove('hidden');
+      refreshModal.classList.add('flex');
+    }
+
+    function closeRefreshModal() {
+      refreshModal.classList.add('hidden');
+      refreshModal.classList.remove('flex');
+      if (refreshEventSource) {
+        refreshEventSource.close();
+        refreshEventSource = null;
+      }
+    }
+
+    closeRefreshModalBtn.addEventListener('click', closeRefreshModal);
+    cancelRefreshBtn.addEventListener('click', closeRefreshModal);
+
+    if (emptyLoadDataBtn) {
+      emptyLoadDataBtn.addEventListener('click', () => {
+        openRefreshModal();
+        startCatalogueRefresh();
+      });
+    }
+
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        openRefreshModal();
+        startCatalogueRefresh();
+      });
+    }
+
+    function startCatalogueRefresh() {
+      refreshLogConsole.innerHTML = '';
+      refreshProgressBar.style.width = '0%';
+      refreshProgressBar.className = 'bg-gradient-to-r from-amber-500 to-orange-500 h-full rounded-full transition-all duration-300 ease-out';
+      refreshPercentLabel.textContent = '0%';
+      refreshStageLabel.textContent = 'Connecting to server...';
+      refreshModalTitle.textContent = 'Fetching VVZ Course Catalogue';
+      refreshModalSubtitle.textContent = 'Running live crawler (fetch_full_catalogue.py)...';
+      refreshSpinner.classList.remove('hidden');
+      closeRefreshModalBtn.classList.add('hidden');
+      cancelRefreshBtn.textContent = 'Run in Background';
+
+      function appendLog(text, colorClass = 'text-slate-300') {
+        const line = document.createElement('div');
+        line.className = colorClass;
+        line.textContent = text;
+        refreshLogConsole.appendChild(line);
+        refreshLogConsole.scrollTop = refreshLogConsole.scrollHeight;
+      }
+
+      appendLog('[CLIENT] Initiating stream connection to /api/refresh_catalogue...', 'text-amber-400');
+
+      if (refreshEventSource) {
+        refreshEventSource.close();
+      }
+
+      refreshEventSource = new EventSource('/api/refresh_catalogue');
+
+      refreshEventSource.addEventListener('log', (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          if (data.percent !== undefined) {
+            refreshProgressBar.style.width = `${data.percent}%`;
+            refreshPercentLabel.textContent = `${data.percent}%`;
+          }
+          if (data.stage) {
+            refreshStageLabel.textContent = data.stage;
+          }
+          if (data.message) {
+            let color = 'text-slate-300';
+            if (data.message.startsWith('>>>')) color = 'text-emerald-400 font-bold';
+            else if (data.message.startsWith('---')) color = 'text-amber-300 font-semibold';
+            else if (data.message.includes('Progress:')) color = 'text-sky-300';
+            else if (data.message.startsWith('✓')) color = 'text-green-400 font-bold';
+            appendLog(data.message, color);
+          }
+        } catch (err) {
+          console.error('SSE log parse err:', err);
+        }
+      });
+
+      refreshEventSource.addEventListener('done', async (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          refreshProgressBar.style.width = '100%';
+          refreshPercentLabel.textContent = '100%';
+          refreshStageLabel.textContent = 'Completed successfully!';
+          refreshModalTitle.textContent = 'Catalogue Updated!';
+          refreshModalSubtitle.textContent = 'All courses, rooms, and schedules have been synchronized.';
+          refreshSpinner.classList.add('hidden');
+          closeRefreshModalBtn.classList.remove('hidden');
+          cancelRefreshBtn.textContent = 'Close';
+
+          appendLog('✓ [SUCCESS] Catalogue synchronization complete! Reloading modules in UI...', 'text-emerald-400 font-bold');
+
+          try {
+            await initApp();
+            showToast('Course Catalogue successfully reloaded from UZH VVZ!', 'info');
+          } catch (reloadErr) {
+            console.error('Failed to reload catalogue:', reloadErr);
+          }
+        } finally {
+          if (refreshEventSource) {
+            refreshEventSource.close();
+            refreshEventSource = null;
+          }
+        }
+      });
+
+      refreshEventSource.addEventListener('error', (e) => {
+        refreshSpinner.classList.add('hidden');
+        closeRefreshModalBtn.classList.remove('hidden');
+        cancelRefreshBtn.textContent = 'Close';
+        refreshProgressBar.className = 'bg-red-500 h-full rounded-full transition-all duration-300 ease-out';
+        refreshStageLabel.textContent = 'Synchronization error';
+        refreshModalTitle.textContent = 'Crawl Error';
+        appendLog('✖ [ERROR] Failed to complete crawl. Check server terminal logs.', 'text-red-400 font-bold');
+        if (refreshEventSource) {
+          refreshEventSource.close();
+          refreshEventSource = null;
+        }
+      });
+    }
 
     initApp();
   </script>

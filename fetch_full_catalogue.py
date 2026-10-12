@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-fetch_full_catalogue.py
-- Queries SemesterSet to dynamically look back from the current semester
-- Crawls both Autumn (HS) and Spring (FS) sessions across all Majors and Minors
-- Queries SmDetailsSet with the official browser $expand structure:
-  Partof,Organizations,Responsible,Events,Events/Persons,OfferPeriods
-- Resolves main lectures vs. exercise groups to prevent false self-clashes
-- Resolves building and room allocations (e.g. Y15-G-60, AND-4-02)
-- Correctly classifies Wahlpflicht and cross-registers electives
-- Saves the complete dataset to catalogue.json
+fetch_full_catalogue.py - Best-of Merged Crawler
+- Queries SemesterSet to dynamically identify relevant HS and FS sessions
+- Crawls Autumn (HS) and Spring (FS) sessions across all Majors and Minors
+- Queries SmDetailsSet with official SAP browser headers & expand parameters
+- Deeply resolves rooms from EDetailsSet when RoomText is 'siehe Details'
+- Maps room codes to official UZH Campuses (Oerlikon, Zentrum, Irchel, Schlieren, Online)
+- Differentiates main lectures from exercise groups to avoid false duplicate clashing
+- Correctly classifies Wahlpflicht (checked before Pflicht)
+- Cross-registers Core Electives into Wahlbereich INF and Wahlbereich WWF
+- Makes modules from other Informatics majors available as electives
+- Saves output into catalogue.json
 """
 
 import concurrent.futures
@@ -19,24 +21,79 @@ import sys
 import urllib.parse
 import urllib.request
 
-SSL_CTX = ssl._create_unverified_context()
+SSL_CTX = ssl.create_default_context()
+SSL_CTX.check_hostname = False
+SSL_CTX.verify_mode = ssl.CERT_NONE
+
 BASE_URL = "https://studentservices.uzh.ch/sap/opu/odata/uzh/vvz_data_srv"
 VVZ_WEB_BASE = "https://studentservices.uzh.ch/uzh/anonym/vvz/index.html#/details"
 CLIENT = "001"
 ROOT_SC = "SC51085510"
 
 SM_EXPAND = "Partof,Organizations,Responsible,Events,Events/Persons,OfferPeriods"
-E_EXPAND = "Schedule,Schedule/Rooms"
+E_EXPAND = "Rooms,Persons,Schedule,Schedule/Rooms,Schedule/Persons,Modules,Links"
 
 INF_MAJOR_IDS = ["CG51087486", "CG51087487", "CG51087484", "CG51087283", "CG51087485"]
 
+DEFAULT_HEADERS = {
+    "Accept": "application/json",
+    "Accept-Language": "de-CH,de;q=0.9,en;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "X-Requested-With": "XMLHttpRequest",
+    "DataServiceVersion": "2.0",
+    "MaxDataServiceVersion": "2.0",
+}
+
+CAMPUS_MAP = {
+    "BIN": "Oerlikon",
+    "AND": "Oerlikon",
+    "AFL": "Oerlikon",
+    "WAG": "Schlieren",
+    "WAD": "Schlieren",
+}
+
+
+def map_room_to_campus(room_str: str) -> str:
+    """Maps a room string (e.g. 'BIN-1-B.01', 'KOL-F-118', 'Y17-M-05') to its UZH campus."""
+    if not room_str or not isinstance(room_str, str):
+        return ""
+    r = room_str.strip()
+    low = r.lower()
+
+    if any(k in low for k in ["online", "zoom", "teams", "virtuell", "podcast", "fernunterricht"]):
+        return "Online"
+    if low in ["siehe details", "s.hinweise", "s. hinweise", "nach vereinbarung", "n.v.", "n. v.", ""]:
+        return ""
+
+    m = re.match(r"^([A-Za-z0-9]+)", r)
+    if not m:
+        return ""
+    bldg = m.group(1).upper()
+
+    if bldg in CAMPUS_MAP:
+        return CAMPUS_MAP[bldg]
+
+    if bldg.startswith("Y") and len(bldg) >= 2 and (bldg[1].isdigit() or bldg == "Y"):
+        return "Irchel"
+    if bldg in ["TFA", "TFB"]:
+        return "Irchel"
+
+    return "Zentrum"
+
+
+def is_exercise_group(title: str) -> bool:
+    """Flags exercise and tutorial sections to separate them from main lectures."""
+    t = title.lower()
+    return any(kw in t for kw in ["übung", "uebung", "exercise", "tutorial", "gr.", "gruppe", "study center", "ausweichgruppe"])
+
 
 def query_odata(path_or_url: str):
-    """Executes a JSON request against the SAP OData service."""
+    """Executes a JSON request against the SAP OData service with official headers."""
     if path_or_url.startswith("http"):
         url = path_or_url
         if "$format=json" not in url:
-            url += ("&" if "?" in url else "?") + "$format=json"
+            sep = "&" if "?" in url else "?"
+            url += f"{sep}$format=json"
         if "sap-client" not in url:
             url += f"&sap-client={CLIENT}"
     else:
@@ -44,12 +101,7 @@ def query_odata(path_or_url: str):
         sep = "&" if "?" in url else "?"
         url += f"{sep}sap-client={CLIENT}&$format=json"
 
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    }
-
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(url, headers=DEFAULT_HEADERS)
     try:
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=14) as resp:
             data = json.loads(resp.read().decode("utf-8"))
@@ -58,21 +110,23 @@ def query_odata(path_or_url: str):
         return None
 
 
-def parse_results(res):
-    if not res:
+def parse_results(container):
+    """Safely extracts results from OData structure."""
+    if not container:
         return []
-    if isinstance(res, list):
-        return res
-    if isinstance(res, dict):
-        if "results" in res and isinstance(res["results"], list):
-            return res["results"]
-        if "d" in res:
-            return parse_results(res["d"])
+    if isinstance(container, list):
+        return container
+    if isinstance(container, dict):
+        if "results" in container and isinstance(container["results"], list):
+            return container["results"]
+        if "d" in container:
+            return parse_results(container["d"])
+        return [container]
     return []
 
 
 def resolve_semesters():
-    """Queries SemesterSet to identify current and previous semester sessions."""
+    """Queries SemesterSet to identify current and populated semester sessions."""
     data = query_odata("SemesterSet")
     raw = parse_results(data)
 
@@ -80,35 +134,21 @@ def resolve_semesters():
     for r in raw:
         print(f"    • {r.get('Text')} ({r.get('Short')}) -> PiqYear='{r.get('PiqYear')}', PiqSession='{r.get('PiqSession')}'", flush=True)
 
-    latest_fs = next((r for r in raw if r.get("PiqSession") == "004"), None)
-    latest_hs = next((r for r in raw if r.get("PiqSession") == "003"), None)
+    # Pick the most relevant populated semesters
+    targets = [
+        {"peryr": "2025", "perid": "003", "term": "HS", "label": "Herbstsemester 2025"},
+        {"peryr": "2025", "perid": "004", "term": "FS", "label": "Frühjahrssemester 2026"}
+    ]
 
-    targets = []
-    if latest_hs:
-        targets.append({
-            "peryr": latest_hs.get("PiqYear", "2026"),
-            "perid": "003",
-            "term": "HS",
-            "label": latest_hs.get("Text", "Herbstsemester")
-        })
-    else:
+    has_hs26 = any(r.get("PiqYear") == "2026" and r.get("PiqSession") == "003" for r in raw)
+    if has_hs26:
         targets.append({"peryr": "2026", "perid": "003", "term": "HS", "label": "Herbstsemester 2026"})
-
-    if latest_fs:
-        targets.append({
-            "peryr": latest_fs.get("PiqYear", "2025"),
-            "perid": "004",
-            "term": "FS",
-            "label": latest_fs.get("Text", "Frühjahrssemester")
-        })
-    else:
-        targets.append({"peryr": "2025", "perid": "004", "term": "FS", "label": "Frühjahrssemester 2026"})
 
     return targets
 
 
 def parse_schedule_string(schedule_text: str, default_room: str = ""):
-    """Parses raw schedule strings (e.g., 'Di 10:15-12:00, Do 10:15-12:00') into normalized time slots."""
+    """Parses raw German and English schedule strings into normalized time slots with room tagging."""
     if not schedule_text or "nach vereinbarung" in schedule_text.lower():
         return []
 
@@ -122,28 +162,36 @@ def parse_schedule_string(schedule_text: str, default_room: str = ""):
         'sa': ('Sat', 6), 'samstag': ('Sat', 6), 'sat': ('Sat', 6), 'saturday': ('Sat', 6),
     }
 
+    clean_room = default_room.strip() if default_room and default_room not in ("siehe Details", "siehe Raumangabe", "s.Hinweise", "(empty)", "None") else ""
+
     pattern = re.compile(
-        r'\b(Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Mo|Di|Mi|Do|Fr|Sa|Mon|Tue|Wed|Thu|Fri|Sat)\b'
-        r'[:\s,]*'
-        r'(?:von|from)?\s*'
-        r'(\d{1,2})[:.](\d{2})\s*(?:-|bis|to)\s*(\d{1,2})[:.](\d{2})',
+        r'\b(Mo(?:ntag)?|Di(?:enstag)?|Mi(?:ttwoch)?|Do(?:nnerstag)?|Fr(?:eitag)?|Sa(?:mstag)?|Mon(?:day)?|Tue(?:sday)?|Wed(?:nesday)?|Thu(?:rsday)?|Fri(?:day)?)\b'
+        r'[^\d]*?'
+        r'(\d{1,2})[:.](\d{2})'
+        r'\s*(?:-|bis|to)\s*'
+        r'(\d{1,2})[:.](\d{2})',
         re.IGNORECASE
     )
-
-    clean_room = default_room if default_room not in ("siehe Details", "siehe Raumangabe", "(empty)", "None") else ""
 
     slots = []
     for match in pattern.finditer(clean):
         day_raw = match.group(1).lower()
-        sh, sm, eh, em = int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
-
-        day_info = day_map.get(day_raw)
-        if not day_info:
+        if day_raw not in day_map:
             continue
+        day_code, day_num = day_map[day_raw]
 
-        day_code, day_num = day_info
+        sh, sm = int(match.group(2)), int(match.group(3))
+        eh, em = int(match.group(4)), int(match.group(5))
+
         start_min = sh * 60 + sm
         end_min = eh * 60 + em
+
+        if end_min <= start_min:
+            continue
+
+        slot_text = f"{day_code} {sh:02d}:{sm:02d}-{eh:02d}:{em:02d}"
+        if clean_room:
+            slot_text += f" ({clean_room})"
 
         slot = {
             "day": day_code,
@@ -153,7 +201,7 @@ def parse_schedule_string(schedule_text: str, default_room: str = ""):
             "start_min": start_min,
             "end_min": end_min,
             "room": clean_room,
-            "text": f"{day_code} {sh:02d}:{sm:02d}-{eh:02d}:{em:02d}" + (f" ({clean_room})" if clean_room else "")
+            "text": slot_text
         }
 
         if not any(s["day"] == slot["day"] and s["start_min"] == slot["start_min"] and s["end_min"] == slot["end_min"] for s in slots):
@@ -162,58 +210,83 @@ def parse_schedule_string(schedule_text: str, default_room: str = ""):
     return slots
 
 
-def is_exercise_group(title: str) -> bool:
-    """Flags exercise and tutorial sections to separate them from main lectures."""
-    t = title.lower()
-    return any(kw in t for kw in ["übung", "uebung", "exercise", "tutorial", "gr.", "gruppe", "study center", "ausweichgruppe"])
-
-
-def fetch_module_full_schedule(sm_id: str, peryr: str, perid: str):
+def fetch_module_full_schedule(sm_id: str, candidate_sessions: list):
     """
-    Queries SmDetailsSet with the official browser $expand set.
-    Extracts main lecture appointments and specific room numbers.
+    Fetches full module schedule, events, and rooms from SmDetailsSet across candidate sessions.
+    Differentiates lectures from exercises and resolves rooms via EDetailsSet.
     """
-    url = f"SmDetailsSet(SmObjId='{sm_id}',PiqYear='{peryr}',PiqSession='{perid}')?$expand={urllib.parse.quote(SM_EXPAND)}"
-    data = query_odata(url)
+    best_events_raw = []
+    best_offer_pattern = ""
+    best_sched_desc = ""
+    chosen_peryr = ""
+    chosen_perid = ""
 
-    if not data:
-        return {"schedule_text": "", "time_slots": [], "offer_pattern": "", "events": []}
+    for y, s in candidate_sessions:
+        url = f"SmDetailsSet(SmObjId='{sm_id}',PiqYear='{y}',PiqSession='{s}')?$expand={urllib.parse.quote(SM_EXPAND)}"
+        res = query_odata(url)
+        if res:
+            events = parse_results(res.get("Events"))
+            op = (res.get("OfferpatternText") or "").strip()
+            ad = (res.get("AppointmentsDescription") or "").strip()
+            if op and not best_offer_pattern:
+                best_offer_pattern = op
+            if ad and len(ad) > len(best_sched_desc):
+                best_sched_desc = ad
+            if events and not best_events_raw:
+                best_events_raw = events
+                chosen_peryr = y
+                chosen_perid = s
 
-    offer_pattern = (data.get("OfferpatternText") or "").strip()
-    events_raw = parse_results(data.get("Events"))
-
+    rooms_set = set()
     parsed_events = []
-    for ev in events_raw:
+
+    for ev in best_events_raw:
         e_id = ev.get("Objid") or ev.get("EObjId")
         title = (ev.get("EStext") or ev.get("Stext") or "").strip()
         sched_text = (ev.get("ScheduleText") or "").strip()
         room_text = (ev.get("RoomText") or "").strip()
 
         # If RoomText is 'siehe Details', inspect EDetailsSet
-        if room_text in ("", "siehe Details", "siehe Raumangabe") and e_id and sched_text:
-            e_url = f"EDetailsSet(EObjId='{e_id}',PiqYear='{peryr}',PiqSession='{perid}')?$expand={urllib.parse.quote(E_EXPAND)}"
+        if room_text in ("", "siehe Details", "siehe Raumangabe", "s.Hinweise") and e_id:
+            e_url = f"EDetailsSet(EObjId='{e_id}',PiqYear='{chosen_peryr}',PiqSession='{chosen_perid}')?$expand={urllib.parse.quote(E_EXPAND)}"
             e_data = query_odata(e_url)
             if e_data and isinstance(e_data, dict):
-                sched_records = parse_results(e_data.get("Schedule"))
-                for sc in sched_records:
-                    rooms_list = parse_results(sc.get("Rooms"))
-                    if rooms_list and rooms_list[0].get("Name"):
-                        room_text = rooms_list[0].get("Name").strip()
-                        break
+                # Check direct Rooms list
+                rooms_list = parse_results(e_data.get("Rooms"))
+                if rooms_list and rooms_list[0].get("Name"):
+                    room_text = rooms_list[0].get("Name").strip()
+                    for r in rooms_list:
+                        rn = (r.get("Name") or "").strip()
+                        if rn:
+                            rooms_set.add(rn)
+                else:
+                    sched_records = parse_results(e_data.get("Schedule"))
+                    for sc in sched_records:
+                        sc_rooms = parse_results(sc.get("Rooms"))
+                        if sc_rooms and sc_rooms[0].get("Name"):
+                            room_text = sc_rooms[0].get("Name").strip()
+                            for sr in sc_rooms:
+                                srn = (sr.get("Name") or "").strip()
+                                if srn:
+                                    rooms_set.add(srn)
+                            break
+
+        if room_text and room_text not in ("", "siehe Details", "siehe Raumangabe", "s.Hinweise", "(empty)", "None"):
+            rooms_set.add(room_text)
 
         slots = parse_schedule_string(sched_text, room_text)
         is_exercise = is_exercise_group(title)
 
         parsed_events.append({
-            "event_id": str(e_id),
+            "event_id": str(e_id) if e_id else "",
             "title": title,
             "is_lecture": not is_exercise,
             "schedule_text": sched_text,
-            "room": room_text if room_text not in ("siehe Details", "siehe Raumangabe", "(empty)") else "",
+            "room": room_text if room_text not in ("siehe Details", "siehe Raumangabe", "s.Hinweise", "(empty)") else "",
             "time_slots": slots
         })
 
-    # Prioritize main lectures for weekly calendar cards
+    # Prioritize main lectures for weekly timetable and card time slots
     lecture_events = [ev for ev in parsed_events if ev["is_lecture"] and ev["time_slots"]]
     chosen_events = lecture_events if lecture_events else [ev for ev in parsed_events if ev["time_slots"]]
 
@@ -224,18 +297,26 @@ def fetch_module_full_schedule(sm_id: str, peryr: str, perid: str):
                 active_slots.append(s)
 
     active_slots.sort(key=lambda s: (s["day_num"], s["start_min"]))
-    summary_text = ", ".join(s["text"] for s in active_slots) if active_slots else ""
+
+    all_schedules = [ev["schedule_text"] for ev in parsed_events if ev["schedule_text"] and ev["schedule_text"] not in ["siehe Details", "s.Hinweise"]]
+    summary_text = "; ".join(all_schedules) if all_schedules else (re.sub(r'<[^>]+>', ' ', best_sched_desc).strip() if best_sched_desc else "")
+
+    campuses = sorted(list(set(map_room_to_campus(r) for r in rooms_set if map_room_to_campus(r))))
+    campus = ", ".join(campuses) if campuses else ""
 
     return {
+        "rooms": sorted(list(rooms_set)),
+        "campuses": campuses,
+        "campus": campus,
         "schedule_text": summary_text,
         "time_slots": active_slots,
-        "offer_pattern": offer_pattern,
+        "offer_pattern": best_offer_pattern,
         "events": parsed_events
     }
 
 
 def classify_category(area_title: str, mod_title: str, is_minor: bool = False) -> str:
-    """Classifies an area title into WWF Studienordnung A7.2 categories[cite: 1]."""
+    """Classifies an area title into WWF Studienordnung A7.2 categories."""
     if is_minor:
         return "minor"
 
@@ -246,7 +327,8 @@ def classify_category(area_title: str, mod_title: str, is_minor: bool = False) -
         return "masterprojekt"
     if "masterarbeit" in a or "masterarbeit" in m or "thesis" in a or "thesis" in m:
         return "masterarbeit"
-    # Strict order: Check 'wahlpflicht' before 'pflicht'[cite: 1]
+
+    # Strictly check wahlpflicht before pflicht
     if "wahlpflicht" in a or "core elective" in a:
         return "wahlpflicht_major"
     if "compulsory" in a or "pflicht" in a:
@@ -260,7 +342,7 @@ def classify_category(area_title: str, mod_title: str, is_minor: bool = False) -
 
 
 def get_child_areas(parent_otjid: str, peryr: str, perid: str):
-    """Recursively resolves all leaf curriculum groups under a program[cite: 1]."""
+    """Recursively resolves all leaf curriculum groups under a program."""
     filter_expr = f"Peryr eq '{peryr}' and Perid eq '{perid}' and ParentOtjid eq '{parent_otjid}'"
     url = f"TreeOnDemandSet?$expand=Childs&$filter={urllib.parse.quote(filter_expr)}"
     res = query_odata(url)
@@ -289,13 +371,15 @@ def get_child_areas(parent_otjid: str, peryr: str, perid: str):
 
 def fetch_modules_for_area(cg_id: str, peryr: str, perid: str):
     """Queries SmListSet with explicit PiqYear and PiqSession."""
-    filter_expr = f"CgId eq '{cg_id}' and PiqYear eq '{peryr}' and PiqSession eq '{perid}'"
+    clean_cg = str(cg_id).replace("CG", "").replace("SC", "")
+    filter_expr = f"CgId eq '{clean_cg}' and PiqYear eq '{peryr}' and PiqSession eq '{perid}'"
     url = f"SmListSet?$filter={urllib.parse.quote(filter_expr)}"
     res = query_odata(url)
     raw_modules = parse_results(res)
 
     if not raw_modules:
-        fallback_url = f"SmListSet?$filter={urllib.parse.quote(f'CgId eq \'{cg_id}\'')}"
+        fallback_filter = f"CgId eq '{clean_cg}'"
+        fallback_url = f"SmListSet?$filter={urllib.parse.quote(fallback_filter)}"
         raw_fallback = parse_results(query_odata(fallback_url))
         if raw_fallback:
             session_match = [m for m in raw_fallback if m.get("PiqSession") == perid]
@@ -304,26 +388,23 @@ def fetch_modules_for_area(cg_id: str, peryr: str, perid: str):
     parsed = []
     for m in raw_modules:
         sm_id = m.get("SmObjId")
-        name = m.get("SmText", "").strip()
+        name = (m.get("SmText") or "").strip()
         if not sm_id or not name:
             continue
 
-        pts_raw = str(m.get("Points", "6")).strip()
+        pts_raw = str(m.get("Points") or m.get("Cp") or "6").strip()
         try:
             ects = int(float(pts_raw))
-        except ValueError:
+        except (ValueError, TypeError):
             ects = 6
 
-        session = m.get("PiqSession") or perid
-        year = m.get("PiqYear") or peryr
+        detail_url = f"{VVZ_WEB_BASE}/{peryr}/{perid}/SM/{sm_id}"
 
         parsed.append({
-            "sm_id": sm_id,
+            "sm_id": str(sm_id),
             "name": name,
             "ects": ects,
-            "year": year,
-            "session": session,
-            "url": f"{VVZ_WEB_BASE}/{year}/{session}/SM/{sm_id}"
+            "url": detail_url
         })
     return parsed
 
@@ -331,33 +412,31 @@ def fetch_modules_for_area(cg_id: str, peryr: str, perid: str):
 def main():
     semesters = resolve_semesters()
 
-    primary_sem = semesters[0]
-    root_filter = f"Peryr eq '{primary_sem['peryr']}' and Perid eq '{primary_sem['perid']}' and ParentOtjid eq '{ROOT_SC}'"
-    root_data = query_odata(f"TreeOnDemandSet?$expand=Childs&$filter={urllib.parse.quote(root_filter)}")
-    programs = parse_results(root_data)
-
-    if not programs:
-        print(f"[!] No programs found under {ROOT_SC}.", flush=True)
-        sys.exit(1)
-
     discovered_majors = {}
     discovered_minors = {}
-    program_list = []
 
-    for p in programs:
-        p_id = p.get("Otjid")
-        p_name = p.get("Stext", "").strip()
-        p_type = "major" if "Major" in p.get("Cgcat", "") else "minor"
+    # Discover all majors and minors across the candidate semesters
+    for sem in semesters:
+        peryr = sem["peryr"]
+        perid = sem["perid"]
+        filter_expr = f"Peryr eq '{peryr}' and Perid eq '{perid}' and ParentOtjid eq '{ROOT_SC}'"
+        root_data = query_odata(f"TreeOnDemandSet?$expand=Childs&$filter={urllib.parse.quote(filter_expr)}")
+        for p in parse_results(root_data):
+            p_id = p.get("Otjid")
+            stext = (p.get("Stext") or "").strip()
+            cgcat = (p.get("Cgcat") or "").strip()
+            display_name = f"{stext} {cgcat}".strip() if cgcat else stext
+            if "Major" in cgcat or "Major" in stext:
+                if p_id not in discovered_majors:
+                    discovered_majors[p_id] = {"id": p_id, "name": display_name}
+            else:
+                if p_id not in discovered_minors:
+                    discovered_minors[p_id] = {"id": p_id, "name": display_name}
 
-        prog_entry = {"id": p_id, "name": p_name, "type": p_type}
-        program_list.append(prog_entry)
+    majors = list(discovered_majors.values())
+    minors = list(discovered_minors.values())
 
-        if p_type == "major":
-            discovered_majors[p_id] = prog_entry
-        else:
-            discovered_minors[p_id] = prog_entry
-
-    print(f"\n>>> 2. Loaded {len(discovered_majors)} Majors and {len(discovered_minors)} Minors from {ROOT_SC}.", flush=True)
+    print(f"\n>>> 2. Loaded {len(majors)} Majors and {len(minors)} Minors from {ROOT_SC}.", flush=True)
 
     catalogue_modules = {}
     area_cache = {}
@@ -365,82 +444,88 @@ def main():
     for sem in semesters:
         peryr = sem["peryr"]
         perid = sem["perid"]
-        term_code = sem["term"]
+        term_label = sem["term"]
+        label = sem["label"]
+        print(f"\n--- Crawling {term_label}: {label} (PiqYear={peryr}, PiqSession={perid}) ---", flush=True)
 
-        print(f"\n--- Crawling {term_code}: {sem['label']} (PiqYear={peryr}, PiqSession={perid}) ---", flush=True)
-
-        for prog in program_list:
+        for prog in majors + minors:
             p_id = prog["id"]
             p_name = prog["name"]
-            p_type = prog["type"]
+            is_minor = prog in minors
             prog_clean_id = p_id.replace("CG", "").replace("SC", "")
 
             areas = get_child_areas(p_id, peryr, perid)
             areas.append({"cg_id": prog_clean_id, "otjid": p_id, "title": p_name, "cat": "Root"})
 
             for area in areas:
-                cg_id = area["cg_id"]
+                area_cg = area["cg_id"]
                 area_title = area["title"]
+                area_otjid = area.get("otjid", area_cg)
 
-                cache_key = f"{cg_id}_{peryr}_{perid}"
+                cache_key = f"{area_cg}_{peryr}_{perid}"
                 if cache_key not in area_cache:
-                    area_cache[cache_key] = fetch_modules_for_area(cg_id, peryr, perid)
+                    area_cache[cache_key] = fetch_modules_for_area(area_cg, peryr, perid)
 
                 mods = area_cache[cache_key]
                 for m in mods:
-                    sm_key = f"SM_{m['sm_id']}"
-                    cat = classify_category(area_title, m["name"], is_minor=(p_type == "minor"))
+                    sm_id = m["sm_id"]
+                    sm_key = f"SM_{sm_id}"
+                    cat = classify_category(area_title, m["name"], is_minor=is_minor)
 
                     if sm_key not in catalogue_modules:
                         catalogue_modules[sm_key] = {
                             "id": sm_key,
-                            "sm_id": m["sm_id"],
+                            "sm_id": sm_id,
                             "name": m["name"],
                             "ects": m["ects"],
                             "url": m["url"],
                             "seen_sessions": set(),
+                            "seen_pairs": set(),
                             "programs": {}
                         }
 
                     catalogue_modules[sm_key]["seen_sessions"].add(perid)
+                    catalogue_modules[sm_key]["seen_pairs"].add((peryr, perid))
 
                     if p_id not in catalogue_modules[sm_key]["programs"]:
                         catalogue_modules[sm_key]["programs"][p_id] = {
                             "program_id": p_id,
                             "program_name": p_name,
-                            "program_type": p_type,
+                            "is_minor": is_minor,
                             "categories": []
                         }
 
                     prog_entry = catalogue_modules[sm_key]["programs"][p_id]
-                    existing_cats = [c["category"] for c in prog_entry["categories"]]
-
-                    if cat not in existing_cats:
+                    if not any(c["category"] == cat for c in prog_entry["categories"]):
                         prog_entry["categories"].append({
                             "category": cat,
+                            "group_id": area_otjid,
                             "group": area_title
                         })
 
-                    # Cross-register Core Electives to general electives[cite: 1]
+                    # Cross-register Core Electives to general electives
                     if cat == "wahlpflicht_major":
                         if "wahl_inf" not in [c["category"] for c in prog_entry["categories"]]:
                             prog_entry["categories"].append({
                                 "category": "wahl_inf",
-                                "group": "Wahlbereich INF (Surplus / General Elective)"
+                                "group_id": area_otjid,
+                                "group": "Wahlbereich INF (Elective)"
                             })
                         if "wahl_wwf" not in [c["category"] for c in prog_entry["categories"]]:
                             prog_entry["categories"].append({
                                 "category": "wahl_wwf",
+                                "group_id": area_otjid,
                                 "group": "Wahlbereich WWF (Faculty Elective)"
                             })
                     elif cat == "wahl_inf":
                         if "wahl_wwf" not in [c["category"] for c in prog_entry["categories"]]:
                             prog_entry["categories"].append({
                                 "category": "wahl_wwf",
+                                "group_id": area_otjid,
                                 "group": "Wahlbereich WWF (Faculty Elective)"
                             })
 
-    # Ensure Analysis II (50809198) attached to Mathematics Minor (CG50753244)
+    # Direct Failsafe: Ensure Analysis II (50809198) attached to Mathematics Minor (CG50753244)
     if "SM_50809198" not in catalogue_modules:
         catalogue_modules["SM_50809198"] = {
             "id": "SM_50809198",
@@ -449,17 +534,18 @@ def main():
             "ects": 9,
             "url": f"{VVZ_WEB_BASE}/2025/004/SM/50809198",
             "seen_sessions": {"004"},
+            "seen_pairs": {("2025", "004")},
             "programs": {
                 "CG50753244": {
                     "program_id": "CG50753244",
-                    "program_name": "Mathematics",
-                    "program_type": "minor",
-                    "categories": [{"category": "minor", "group": "Mathematics"}]
+                    "program_name": "Mathematics Minor 30",
+                    "is_minor": True,
+                    "categories": [{"category": "minor", "group_id": "manual", "group": "Analysis II"}]
                 }
             }
         }
 
-    # Cross-Major Elective Availability[cite: 1]
+    # Cross-Major Elective Availability
     for mod in catalogue_modules.values():
         belongs_to_any_inf = any(p_id in mod["programs"] for p_id in INF_MAJOR_IDS)
         if belongs_to_any_inf:
@@ -467,50 +553,71 @@ def main():
                 if inf_id not in mod["programs"]:
                     mod["programs"][inf_id] = {
                         "program_id": inf_id,
-                        "program_name": discovered_majors.get(inf_id, {}).get("name", "Informatics"),
-                        "program_type": "major",
+                        "program_name": discovered_majors.get(inf_id, {}).get("name", "Informatics Cross-Major Elective"),
+                        "is_minor": False,
                         "categories": [
-                            {"category": "wahl_inf", "group": "Wahlbereich INF (Cross-Program Elective)"},
-                            {"category": "wahl_wwf", "group": "Wahlbereich WWF"}
+                            {"category": "wahl_inf", "group_id": "cross_inf", "group": "Wahlbereich INF"},
+                            {"category": "wahl_wwf", "group_id": "cross_wwf", "group": "Wahlbereich WWF"}
                         ]
                     }
 
-    print(f"\n>>> 3. Concurrently retrieving event schedules (SM -> Events) for {len(catalogue_modules)} modules...", flush=True)
+    print(f"\n>>> 3. Concurrently fetching schedule details, rooms, and campuses for {len(catalogue_modules)} modules...", flush=True)
 
     details_map = {}
 
-    def fetch_worker(m_tuple):
-        sm_id, seen_sess = m_tuple
-        if "003" in seen_sess:
-            res = fetch_module_full_schedule(sm_id, "2026", "003")
-            if res["time_slots"]:
-                return sm_id, res
-        if "004" in seen_sess:
-            res = fetch_module_full_schedule(sm_id, "2025", "004")
-            if res["time_slots"]:
-                return sm_id, res
-        return sm_id, fetch_module_full_schedule(sm_id, "2026", "003")
+    def fetch_worker(item):
+        sm_id, seen_pairs = item
+        candidates = list(seen_pairs)
+        for fallback in [("2025", "003"), ("2025", "004"), ("2026", "003"), ("2024", "004")]:
+            if fallback not in candidates:
+                candidates.append(fallback)
+        return sm_id, fetch_module_full_schedule(sm_id, candidates)
 
-    worker_items = [(m["sm_id"], m["seen_sessions"]) for m in catalogue_modules.values()]
+    work_items = [(m["sm_id"], list(m.get("seen_pairs", []))) for m in catalogue_modules.values()]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_id = {executor.submit(fetch_worker, item): item[0] for item in worker_items}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
         completed = 0
+        future_to_id = {executor.submit(fetch_worker, item): item[0] for item in work_items}
         for future in concurrent.futures.as_completed(future_to_id):
-            sm_id, result = future.result()
-            details_map[sm_id] = result
+            sm_id = future_to_id[future]
+            try:
+                _, res = future.result()
+                details_map[sm_id] = res
+            except Exception:
+                details_map[sm_id] = {
+                    "rooms": [],
+                    "campuses": [],
+                    "campus": "",
+                    "schedule_text": "",
+                    "time_slots": [],
+                    "events": [],
+                    "offer_pattern": ""
+                }
             completed += 1
-            if completed % 35 == 0 or completed == len(worker_items):
-                print(f"   Progress: {completed}/{len(worker_items)} modules resolved...", flush=True)
+            if completed % 50 == 0 or completed == len(work_items):
+                print(f"   Progress: {completed}/{len(work_items)} schedules fetched...", flush=True)
 
     count_hs = 0
     count_fs = 0
     count_both = 0
+    campus_counts = {}
     scheduled_count = 0
 
     for mod in catalogue_modules.values():
         sm_id = mod["sm_id"]
-        det = details_map.get(sm_id, {"schedule_text": "", "time_slots": [], "offer_pattern": "", "events": []})
+        det = details_map.get(sm_id, {
+            "rooms": [],
+            "campuses": [],
+            "campus": "",
+            "schedule_text": "",
+            "time_slots": [],
+            "events": [],
+            "offer_pattern": ""
+        })
+
+        mod["rooms"] = det["rooms"]
+        mod["campuses"] = det["campuses"]
+        mod["campus"] = det["campus"]
         mod["schedule_text"] = det["schedule_text"]
         mod["time_slots"] = det["time_slots"]
         mod["events"] = det.get("events", [])
@@ -519,7 +626,12 @@ def main():
         if mod["time_slots"]:
             scheduled_count += 1
 
+        for camp in det["campuses"]:
+            campus_counts[camp] = campus_counts.get(camp, 0) + 1
+
         seen = mod.pop("seen_sessions", set())
+        mod.pop("seen_pairs", None)
+
         if "003" in seen and "004" in seen:
             term = "both"
         elif "004" in seen:
@@ -550,29 +662,36 @@ def main():
         if "CG51087486" in m["programs"] and any(c["category"] == "wahlpflicht_major" for c in m["programs"]["CG51087486"]["categories"])
     )
 
-    print(f"\n>>> Crawl Verification Summary:")
-    print(f"    • Total Unique Modules:             {len(catalogue_modules)}")
-    print(f"    • Modules with Live Lecture Hours:  {scheduled_count}")
-    print(f"    • Pure HS (Autumn):                 {count_hs}")
-    print(f"    • Pure FS (Spring):                 {count_fs}")
-    print(f"    • Both (HS/FS):                     {count_both}")
-    print(f"    • AI Major Wahlpflicht Modules:     {wp_ai_count}")
+    modules_with_slots = sum(1 for m in catalogue_modules.values() if m.get("time_slots"))
+    modules_with_rooms = sum(1 for m in catalogue_modules.values() if m.get("rooms"))
+
+    print("\n>>> Crawl Verification Summary:")
+    print(f"    • Total Unique Modules:           {len(catalogue_modules)}")
+    print(f"    • Modules with Time Slots:        {modules_with_slots}")
+    print(f"    • Modules with Rooms/Campus:      {modules_with_rooms}")
+    print(f"    • Pure HS (Autumn):               {count_hs}")
+    print(f"    • Pure FS (Spring):               {count_fs}")
+    print(f"    • Both (HS/FS):                   {count_both}")
+    print(f"    • AI Major Wahlpflicht Modules:   {wp_ai_count}")
+    print(f"    • Campus Distribution:            {campus_counts}")
 
     final_catalogue = {
         "metadata": {
             "root": ROOT_SC,
-            "crawled_terms": [s["label"] for s in semesters],
-            "total_modules": len(catalogue_modules)
+            "majors_count": len(majors),
+            "minors_count": len(minors),
+            "total_modules": len(catalogue_modules),
+            "crawled_semesters": [s["label"] for s in semesters]
         },
-        "majors": list(discovered_majors.values()),
-        "minors": list(discovered_minors.values()),
+        "majors": majors,
+        "minors": minors,
         "modules": list(catalogue_modules.values())
     }
 
     with open("catalogue.json", "w", encoding="utf-8") as f:
         json.dump(final_catalogue, f, indent=2, ensure_ascii=False)
 
-    print("✓ Successfully saved catalogue.json with live lecture schedules and room allocations!")
+    print("✓ Successfully saved catalogue.json with full campuses, rooms, and schedules!")
 
 
 if __name__ == "__main__":
